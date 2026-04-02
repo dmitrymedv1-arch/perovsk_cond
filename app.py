@@ -3030,14 +3030,64 @@ def main():
         selected_atmosphere = []
         
         try:
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
+            # Load file with proper multi-row header handling
+            # First, read the first row (contains "σ total, mS" etc.)
+            header_row1 = pd.read_excel(
+                uploaded_file, 
+                engine='openpyxl', 
+                header=None, 
+                nrows=1
+            ).iloc[0].fillna('')
+            
+            # Read the main data using second row as headers
+            df = pd.read_excel(
+                uploaded_file, 
+                engine='openpyxl', 
+                header=1  # Use row 2 as header (0-indexed)
+            )
+            
+            # Clean column names - remove unnamed columns and fix multi-level headers
+            new_columns = []
+            for i, (col1, col2) in enumerate(zip(header_row1, df.columns)):
+                col1_str = str(col1).strip() if not pd.isna(col1) else ''
+                col2_str = str(col2).strip() if not pd.isna(col2) else ''
+                
+                # If col2 is a number (temperature) and col1 contains conductivity type
+                if col2_str.isdigit():
+                    if 'σ total' in col1_str or 'sigma total' in col1_str.lower():
+                        new_columns.append(f"σ total, mS {col2_str}")
+                    elif 'σ bulk' in col1_str or 'sigma bulk' in col1_str.lower():
+                        new_columns.append(f"σ bulk, mS {col2_str}")
+                    elif 'σ gb' in col1_str or 'sigma gb' in col1_str.lower():
+                        new_columns.append(f"σ gb, mS {col2_str}")
+                    else:
+                        new_columns.append(col2_str)
+                elif col2_str and col2_str != 'Unnamed':
+                    new_columns.append(col2_str)
+                elif col1_str:
+                    new_columns.append(col1_str)
+                else:
+                    new_columns.append(f"col_{i}")
+            
+            df.columns = new_columns
+            
+            # Remove rows where A cation is empty (these are empty rows after header)
+            if 'A cation' in df.columns:
+                df = df.dropna(subset=['A cation'], how='all')
+            
+            # Also remove rows where all key columns are empty
+            key_cols = ['A cation', 'B1 cation', 'Сд']
+            existing_key_cols = [col for col in key_cols if col in df.columns]
+            if existing_key_cols:
+                df = df.dropna(subset=existing_key_cols, how='all')
             
             st.success(f"✅ File loaded: {len(df)} rows")
             
-            # Process data without progress_bar in cache
+            # Process data
             with st.spinner("🔄 Processing conductivity data... Please wait."):
                 df_long, df_wide = process_conductivity_data(df)
             
+            st.success(f"✅ Processed: {len(df_long)} measurements")
             st.success(f"✅ Processed: {len(df_long)} measurements")
             
             # Create filters in sidebar
