@@ -3524,7 +3524,6 @@ def main():
         - B-site radius mismatch analysis
         """)
 
-
 if __name__ == "__main__":
     main()
 
@@ -3533,82 +3532,78 @@ if __name__ == "__main__":
 # UNIT TESTS (for development and debugging)
 # ============================================================================
 
-if __name__ == "__main__":
-    # Unit tests for key functions
-    import sys
+# Unit tests for key functions
+import sys
+
+def test_safe_float_converter():
+    """Test safe_float_converter function"""
+    assert safe_float_converter(123) == 123.0
+    assert safe_float_converter("123") == 123.0
+    assert safe_float_converter("123.45") == 123.45
+    assert safe_float_converter("123,45") == 123.45
+    assert safe_float_converter("123%") == 123.0
+    assert safe_float_converter("") is None
+    assert safe_float_converter(None) is None
+    assert safe_float_converter("abc") is None
+    print("✓ test_safe_float_converter passed")
+
+def test_flexible_column_mapper():
+    """Test FlexibleColumnMapper"""
+    mapper = FlexibleColumnMapper()
     
-    def test_safe_float_converter():
-        """Test safe_float_converter function"""
-        assert safe_float_converter(123) == 123.0
-        assert safe_float_converter("123") == 123.0
-        assert safe_float_converter("123.45") == 123.45
-        assert safe_float_converter("123,45") == 123.45
-        assert safe_float_converter("123%") == 123.0
-        assert safe_float_converter("") is None
-        assert safe_float_converter(None) is None
-        assert safe_float_converter("abc") is None
-        print("✓ test_safe_float_converter passed")
+    # Test pattern matching
+    assert any(re.search(pattern, "σ total, mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
+    assert any(re.search(pattern, "sigma_total_mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
+    assert any(re.search(pattern, "σ bulk", re.IGNORECASE) for pattern in mapper.patterns['sigma_bulk'])
+    assert any(re.search(pattern, "σ gb", re.IGNORECASE) for pattern in mapper.patterns['sigma_gb'])
     
-    def test_flexible_column_mapper():
-        """Test FlexibleColumnMapper"""
-        mapper = FlexibleColumnMapper()
-        
-        # Test pattern matching
-        assert any(re.search(pattern, "σ total, mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
-        assert any(re.search(pattern, "sigma_total_mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
-        assert any(re.search(pattern, "σ bulk", re.IGNORECASE) for pattern in mapper.patterns['sigma_bulk'])
-        assert any(re.search(pattern, "σ gb", re.IGNORECASE) for pattern in mapper.patterns['sigma_gb'])
-        
-        print("✓ test_flexible_column_mapper passed")
+    print("✓ test_flexible_column_mapper passed")
+
+def test_polynomial_regression():
+    """Test polynomial_regression_analysis"""
+    # Create synthetic data
+    np.random.seed(42)
+    x = np.linspace(0, 1, 20)
+    y = x**2 + 0.1 * np.random.randn(20)
+    df = pd.DataFrame({'x': x, 'y': y})
     
-    def test_polynomial_regression():
-        """Test polynomial_regression_analysis"""
-        # Create synthetic data
-        np.random.seed(42)
-        x = np.linspace(0, 1, 20)
-        y = x**2 + 0.1 * np.random.randn(20)
-        df = pd.DataFrame({'x': x, 'y': y})
-        
-        result = polynomial_regression_analysis(df, 'x', 'y', degree=2)
-        
-        assert result['model'] is not None
-        assert result['r2'] is not None
-        assert result['r2'] > 0.8  # Should fit well
-        assert len(result['x_pred']) == 100
-        assert len(result['y_pred']) == 100
-        
-        print("✓ test_polynomial_regression passed")
+    result = polynomial_regression_analysis(df, 'x', 'y', degree=2)
     
-    def test_partial_correlation():
-        """Test partial_correlation_analysis"""
-        np.random.seed(42)
-        n = 50
-        data = {
-            'target': np.random.randn(n),
-            'feature1': np.random.randn(n),
-            'feature2': np.random.randn(n),
-            'control': np.random.randn(n)
-        }
-        df = pd.DataFrame(data)
-        
-        result = partial_correlation_analysis(df, 'target', ['feature1', 'feature2'], ['control'])
-        
-        assert len(result) == 2
-        assert 'partial_correlation' in result.columns
-        assert 'p_value' in result.columns
-        
-        print("✓ test_partial_correlation passed")
+    assert result['model'] is not None
+    assert result['r2'] is not None
+    assert result['r2'] > 0.8  # Should fit well
+    assert len(result['x_pred']) == 100
+    assert len(result['y_pred']) == 100
     
-    # Run tests
-    print("\n=== Running Unit Tests ===\n")
-    try:
-        test_safe_float_converter()
-        test_flexible_column_mapper()
-        test_polynomial_regression()
-        test_partial_correlation()
-        print("\n✅ All tests passed!")
-    except Exception as e:
-        print(f"\n❌ Test failed: {e}")
+    print("✓ test_polynomial_regression passed")
+
+def test_partial_correlation():
+    """Test partial_correlation_analysis"""
+    np.random.seed(42)
+    n = 50
+    data = {
+        'target': np.random.randn(n),
+        'feature1': np.random.randn(n),
+        'feature2': np.random.randn(n),
+        'control': np.random.randn(n)
+    }
+    df = pd.DataFrame(data)
     
-    # Run main application
-    main()
+    result = partial_correlation_analysis(df, 'target', ['feature1', 'feature2'], ['control'])
+    
+    assert len(result) == 2
+    assert 'partial_correlation' in result.columns
+    assert 'p_value' in result.columns
+    
+    print("✓ test_partial_correlation passed")
+
+# Run tests
+print("\n=== Running Unit Tests ===\n")
+try:
+    test_safe_float_converter()
+    test_flexible_column_mapper()
+    test_polynomial_regression()
+    test_partial_correlation()
+    print("\n✅ All tests passed!")
+except Exception as e:
+    print(f"\n❌ Test failed: {e}")
