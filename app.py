@@ -2085,7 +2085,10 @@ def plot_conductivity_heatmap(df_wide, ax, temperature=600):
         return ax
     
     pivot_df = pd.DataFrame(pivot_data)
-    heatmap_data = pivot_df.pivot(index='B_cation', columns='Additive', values='sigma')
+    
+    pivot_df_aggregated = pivot_df.groupby(['B_cation', 'Additive'], as_index=False)['sigma'].mean()
+    
+    heatmap_data = pivot_df_aggregated.pivot(index='B_cation', columns='Additive', values='sigma')
     
     if len(heatmap_data) == 0:
         ax.text(0.5, 0.5, 'Cannot create heatmap', ha='center', va='center')
