@@ -8,8 +8,9 @@ from sklearn.manifold import TSNE
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.cluster import DBSCAN
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, KFold, train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.linear_model import LinearRegression
 from scipy import stats
 from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
@@ -24,15 +25,22 @@ from plotly.subplots import make_subplots
 import shap
 import xgboost as xgb
 from itertools import combinations
+from scipy.stats import pearsonr
+from scipy.stats import spearmanr
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import make_pipeline
+import time
 warnings.filterwarnings('ignore')
 
-# Константы
-AVOGADRO_NUMBER = 6.02214076e23  # моль⁻¹
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+AVOGADRO_NUMBER = 6.02214076e23  # mol⁻¹
 OXYGEN_RADIUS = 1.4  # Å
-PREFACTOR_VOLUME = 16 * np.pi / 3  # 16π/3 для расчета объема сфер
-GAS_CONSTANT = 8.314  # Дж/(моль·К)
+PREFACTOR_VOLUME = 16 * np.pi / 3  # 16π/3 for sphere volume calculation
+GAS_CONSTANT = 8.314  # J/(mol·K)
 
-# Научный стиль графиков
+# Scientific plot style
 plt.rcParams.update({
     'font.size': 10,
     'font.family': 'serif',
@@ -72,23 +80,23 @@ plt.rcParams.update({
 })
 
 # ============================================================================
-# БАЗА ДАННЫХ ИОННЫХ РАДИУСОВ (Шеннон)
+# DATABASE OF IONIC RADII (Shannon)
 # ============================================================================
 IONIC_RADII = {
-    # Формат: (ион, заряд, КЧ): (кристаллический радиус, ионный радиус)
-    # Для A-сайта используем КЧ=12, для B-сайта КЧ=6, для O - фиксированное значение
+    # Format: (ion, charge, CN): (crystal radius, ionic radius)
+    # For A-site use CN=12, for B-site CN=6, for O - fixed value
     ('Ba', 2, 12): 1.61,
     ('Sr', 2, 12): 1.44,
     ('O', -2, 6): 1.4,
     
-    # B-катионы (КЧ=6)
+    # B-cations (CN=6)
     ('Ce', 4, 6): 0.87,
     ('Zr', 4, 6): 0.72,
     ('Sn', 4, 6): 0.69,
     ('Ti', 4, 6): 0.605,
     ('Hf', 4, 6): 0.71,
     
-    # D-допанты (акцепторы, обычно 3+, КЧ=6)
+    # D-dopants (acceptors, usually 3+, CN=6)
     ('Gd', 3, 6): 0.938,
     ('Sm', 3, 6): 0.958,
     ('Y', 3, 6): 0.9,
@@ -107,7 +115,7 @@ IONIC_RADII = {
     ('Lu', 3, 6): 0.861,
     ('Ca', 2, 6): 1.00,
     
-    # Спекающие добавки (переходные металлы, КЧ=6 для простоты)
+    # Sintering additives (transition metals, CN=6 for simplicity)
     ('Cu', 2, 6): 0.73,
     ('Ni', 2, 6): 0.69,
     ('Zn', 2, 6): 0.74,
@@ -115,7 +123,7 @@ IONIC_RADII = {
 }
 
 # ============================================================================
-# БАЗА ДАННЫХ ЭЛЕКТРООТРИЦАТЕЛЬНОСТИ (Полинг)
+# DATABASE OF ELECTRONEGATIVITY (Pauling)
 # ============================================================================
 ELECTRONEGATIVITY = {
     'Ba': 0.89,
@@ -150,7 +158,7 @@ ELECTRONEGATIVITY = {
 }
 
 # ============================================================================
-# БАЗА ДАННЫХ ЗАРЯДОВ ИОНОВ
+# DATABASE OF IONIC CHARGES
 # ============================================================================
 IONIC_CHARGES = {
     'Ba': 2,
@@ -185,7 +193,7 @@ IONIC_CHARGES = {
 }
 
 # ============================================================================
-# БАЗА ДАННЫХ СВОЙСТВ БАЗОВЫХ СТРУКТУР
+# DATABASE OF BASIC STRUCTURE PROPERTIES
 # ============================================================================
 MATERIAL_PROPERTIES = {
     'BaCeO3': {
@@ -245,7 +253,7 @@ MATERIAL_PROPERTIES = {
 }
 
 # ============================================================================
-# АТОМНЫЕ МАССЫ (г/моль)
+# ATOMIC MASSES (g/mol)
 # ============================================================================
 ATOMIC_MASSES = {
     'Ba': 137.33,
@@ -279,7 +287,7 @@ ATOMIC_MASSES = {
     'Co': 58.93,
 }
 
-# Цветовая карта для B-катионов
+# Color map for B-cations
 B_COLORS = {
     'Ce': '#E41A1C',
     'Zr': '#377EB8',
@@ -289,7 +297,7 @@ B_COLORS = {
     'default': '#999999'
 }
 
-# Цветовая карта для спекающих добавок
+# Color map for sintering additives
 SINTERING_ADDITIVE_COLORS = {
     'Pure': '#4DAF4A',
     'Cu': '#E41A1C',
@@ -299,7 +307,7 @@ SINTERING_ADDITIVE_COLORS = {
     'default': '#999999'
 }
 
-# Маркеры для спекающих добавок
+# Markers for sintering additives
 SINTERING_ADDITIVE_MARKERS = {
     'Pure': 'o',
     'Cu': 's',
@@ -309,82 +317,305 @@ SINTERING_ADDITIVE_MARKERS = {
     'default': 'o'
 }
 
+# Literature-based incorporation likelihood (True = dissolves in lattice, False = segregates to GB)
+ADDITIVE_INCORPORATION = {
+    'Zn': True,   # Zn often dissolves into B-site
+    'Cu': False,  # Cu typically segregates to grain boundaries
+    'Ni': False,  # Ni tends to segregate
+    'Co': True,   # Co can incorporate depending on conditions
+    'Pure': True  # No additive, N/A
+}
+
 # ============================================================================
-# НОВЫЙ КЛАСС: РАСЧЕТЧИК ДЕСКРИПТОРОВ ДЛЯ АНАЛИЗА ПРОВОДИМОСТИ
+# HELPER FUNCTIONS
+# ============================================================================
+
+def safe_float_converter(value):
+    """
+    Safely convert a value to float, handling NaN, None, and string values.
+    
+    Parameters
+    ----------
+    value : any
+        Value to convert to float
+        
+    Returns
+    -------
+    float or None
+        Converted float value or None if conversion fails
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if np.isnan(value):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        # Handle empty strings
+        if value.strip() == '':
+            return None
+        # Handle percentage signs
+        if '%' in value:
+            value = value.replace('%', '')
+        # Handle comma as decimal separator (European format)
+        if ',' in value and '.' not in value:
+            value = value.replace(',', '.')
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+class FlexibleColumnMapper:
+    """
+    Flexible column mapper for finding columns with different naming conventions.
+    
+    This class handles variations in column names like:
+    - "σ total, mS" vs "sigma_total_mS" vs "Total conductivity (mS/cm)"
+    - "600" vs "600C" vs "600°C" vs "600 C"
+    """
+    
+    def __init__(self):
+        """Initialize the column mapper with patterns for different measurement types."""
+        self.patterns = {
+            'sigma_total': [
+                r'σ\s*total',
+                r'sigma\s*_?\s*total',
+                r'total\s*conductivity',
+                r'σ\s*\(total\)',
+                r'σ\s*,\s*mS',
+                r'σ\s*total\s*,\s*mS'
+            ],
+            'sigma_bulk': [
+                r'σ\s*bulk',
+                r'sigma\s*_?\s*bulk',
+                r'bulk\s*conductivity',
+                r'σ\s*\(bulk\)'
+            ],
+            'sigma_gb': [
+                r'σ\s*gb',
+                r'sigma\s*_?\s*gb',
+                r'grain\s*boundary',
+                r'σ\s*\(gb\)'
+            ]
+        }
+    
+    def find_column(self, df, col_type, temperature):
+        """
+        Find a column in the dataframe by type and temperature.
+        
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            Dataframe to search
+        col_type : str
+            Type of column ('sigma_total', 'sigma_bulk', 'sigma_gb')
+        temperature : int
+            Temperature in Celsius
+            
+        Returns
+        -------
+        str or None
+            Column name if found, None otherwise
+        """
+        temp_patterns = [
+            f'{temperature}',
+            f'{temperature}C',
+            f'{temperature}°C',
+            f'{temperature} C',
+            f'{temperature}° C',
+            f'_{temperature}_',
+            f'@{temperature}'
+        ]
+        
+        for col in df.columns:
+            col_str = str(col).lower()
+            
+            # Check if column matches the type pattern
+            type_match = False
+            for pattern in self.patterns.get(col_type, []):
+                if re.search(pattern, col_str, re.IGNORECASE):
+                    type_match = True
+                    break
+            
+            if not type_match:
+                continue
+            
+            # Check if column contains the temperature
+            temp_match = False
+            for t_pattern in temp_patterns:
+                if t_pattern.lower() in col_str:
+                    temp_match = True
+                    break
+            
+            if temp_match:
+                return col
+        
+        return None
+
+
+# ============================================================================
+# NEW CLASS: CONDUCTIVITY DESCRIPTOR CALCULATOR (ENHANCED)
 # ============================================================================
 class ConductivityDescriptorCalculator:
-    """Класс для расчета всех физико-химических и микроструктурных дескрипторов для анализа проводимости"""
+    """
+    Class for calculating all physicochemical and microstructural descriptors for conductivity analysis.
+    
+    This enhanced version includes additional descriptors:
+    - radius_mismatch: absolute difference from ideal B-site radius
+    - electronegativity_difference_B_O: difference between average B and oxygen
+    - lattice_distortion_index: approximate lattice distortion from tolerance factor
+    - additive_incorporation_likely: binary indicator from literature
+    """
     
     def __init__(self, a_element='Ba'):
+        """
+        Initialize the descriptor calculator.
+        
+        Parameters
+        ----------
+        a_element : str
+            A-site cation (default: 'Ba')
+        """
         self.a_element = a_element
         self.r_O = IONIC_RADII.get(('O', -2, 6), 1.4)
         self.χ_O = ELECTRONEGATIVITY.get('O', 3.44)
         self.r_A = IONIC_RADII.get((a_element, 2, 12), None)
         self.χ_A = ELECTRONEGATIVITY.get(a_element, None)
         self.z_A = IONIC_CHARGES.get(a_element, 2)
-        # Теоретическая плотность для расчета пористости
+        # Theoretical density for porosity calculation
         self.theoretical_density = None
+        # Reference radius for mismatch calculation (typically Zr or Ce)
+        self.reference_B_radius = 0.72  # Zr4+ radius as reference
     
     def get_ionic_radius(self, element, charge=None, coordination=6):
-        """Получение ионного радиуса с автоматическим определением заряда"""
+        """
+        Get ionic radius with automatic charge detection.
+        
+        Parameters
+        ----------
+        element : str
+            Element symbol
+        charge : int, optional
+            Ionic charge (auto-detected if not provided)
+        coordination : int
+            Coordination number (default: 6)
+            
+        Returns
+        -------
+        float or None
+            Ionic radius in Angstroms
+        """
         if charge is None:
             charge = IONIC_CHARGES.get(element, 4)
         return IONIC_RADII.get((element, charge, coordination), None)
     
     def get_electronegativity(self, element):
+        """
+        Get electronegativity of an element.
+        
+        Parameters
+        ----------
+        element : str
+            Element symbol
+            
+        Returns
+        -------
+        float or None
+            Pauling electronegativity
+        """
         return ELECTRONEGATIVITY.get(element, None)
     
     def get_charge(self, element):
+        """
+        Get typical ionic charge of an element.
+        
+        Parameters
+        ----------
+        element : str
+            Element symbol
+            
+        Returns
+        -------
+        int or None
+            Ionic charge
+        """
         return IONIC_CHARGES.get(element, None)
     
     def get_atomic_mass(self, element):
+        """
+        Get atomic mass of an element.
+        
+        Parameters
+        ----------
+        element : str
+            Element symbol
+            
+        Returns
+        -------
+        float or None
+            Atomic mass in g/mol
+        """
         return ATOMIC_MASSES.get(element, None)
     
     def calculate_formula(self, b1_element, b2_element, b2_cont, dopant, dop_cont):
         """
-        Расчет состава и базовых параметров из столбцов таблицы
+        Calculate composition and basic parameters from table columns.
         
         Parameters
         ----------
         b1_element : str
-            Основной элемент B-сайта (например, Zr)
+            Main B-site element (e.g., Zr)
         b2_element : str or NaN
-            Второй элемент B-сайта (например, Ce)
+            Second B-site element (e.g., Ce)
         b2_cont : float
-            Содержание второго B-элемента (например, 0.3)
+            Content of second B-element (e.g., 0.3)
         dopant : str
-            Легирующий элемент (акцептор, например, Y)
+            Doping element (acceptor, e.g., Y)
         dop_cont : float
-            Содержание легирующего элемента (например, 0.2)
+            Doping content (e.g., 0.2)
         
         Returns
         -------
         dict
-            Словарь с рассчитанными параметрами состава
+            Dictionary with calculated composition parameters
         """
+        # Safe conversion of inputs
+        b2_cont_safe = 0.0
+        if b2_cont is not None and not pd.isna(b2_cont):
+            b2_cont_safe = safe_float_converter(b2_cont) or 0.0
+        
+        dop_cont_safe = 0.0
+        if dop_cont is not None and not pd.isna(dop_cont):
+            dop_cont_safe = safe_float_converter(dop_cont) or 0.0
+        
         result = {
             'formula_type': 'simple',
             'b1_element': b1_element,
             'b2_element': b2_element,
-            'b2_cont': b2_cont if not pd.isna(b2_cont) else 0,
+            'b2_cont': b2_cont_safe,
             'dopant': dopant,
-            'dop_cont': dop_cont if not pd.isna(dop_cont) else 0,
-            'x_B2': b2_cont if not pd.isna(b2_cont) else 0,
-            'y_dop': dop_cont if not pd.isna(dop_cont) else 0,
+            'dop_cont': dop_cont_safe,
+            'x_B2': b2_cont_safe,
+            'y_dop': dop_cont_safe,
         }
         
-        # Определение формулы
-        if pd.isna(b2_element) or b2_element == '' or b2_cont == 0:
-            # Простой допант: AB1_{1-y}D_yO_{3-y/2}
+        # Determine formula type
+        if pd.isna(b2_element) or b2_element == '' or b2_cont_safe == 0:
+            # Simple dopant: AB1_{1-y}D_yO_{3-y/2}
             result['formula_type'] = 'simple'
             result['b_main'] = b1_element
             result['x_B2'] = 0
         else:
-            # Сложный состав: AB1_{1-x-y}B2_xD_yO_{3-y/2}
+            # Complex composition: AB1_{1-x-y}B2_xD_yO_{3-y/2}
             result['formula_type'] = 'complex'
             result['b_main'] = b1_element
         
-        # Расчет среднего ионного радиуса B-сайта
+        # Calculate average B-site ionic radius
         r_B1 = self.get_ionic_radius(b1_element, 4, 6)
         r_B2 = self.get_ionic_radius(b2_element, 4, 6) if not pd.isna(b2_element) and b2_element != '' else None
         r_D = self.get_ionic_radius(dopant, 3, 6) if not pd.isna(dopant) and dopant != '' else None
@@ -407,7 +638,7 @@ class ConductivityDescriptorCalculator:
         else:
             result['r_D'] = None
         
-        # Средний радиус B-сайта
+        # Average B-site radius
         if result['formula_type'] == 'simple' and r_B1 is not None and r_D is not None:
             result['r_avg_B'] = (1 - y) * r_B1 + y * r_D
         elif result['formula_type'] == 'complex' and r_B1 is not None and r_B2 is not None and r_D is not None:
@@ -415,13 +646,26 @@ class ConductivityDescriptorCalculator:
         else:
             result['r_avg_B'] = None
         
+        # NEW: Radius mismatch (absolute difference from reference)
+        if result['r_avg_B'] is not None:
+            result['radius_mismatch'] = abs(result['r_avg_B'] - self.reference_B_radius)
+        else:
+            result['radius_mismatch'] = None
+        
         # Tolerance factor
         if self.r_A is not None and result['r_avg_B'] is not None and self.r_O is not None:
             result['tolerance_factor'] = (self.r_A + self.r_O) / (np.sqrt(2) * (result['r_avg_B'] + self.r_O))
         else:
             result['tolerance_factor'] = None
         
-        # Средняя электроотрицательность B-сайта
+        # NEW: Lattice distortion index (from tolerance factor deviation)
+        if result['tolerance_factor'] is not None:
+            # Distortion increases as tolerance factor deviates from 1.0
+            result['lattice_distortion_index'] = abs(result['tolerance_factor'] - 1.0)
+        else:
+            result['lattice_distortion_index'] = None
+        
+        # Average B-site electronegativity
         χ_B1 = self.get_electronegativity(b1_element)
         χ_B2 = self.get_electronegativity(b2_element) if not pd.isna(b2_element) and b2_element != '' else None
         χ_D = self.get_electronegativity(dopant) if not pd.isna(dopant) and dopant != '' else None
@@ -448,16 +692,22 @@ class ConductivityDescriptorCalculator:
         else:
             result['χ_avg_B'] = None
         
-        # Разница электроотрицательностей
+        # Difference in electronegativity (B-site average vs A-site)
         if result['χ_avg_B'] is not None and self.χ_A is not None:
             result['Δχ'] = abs(result['χ_avg_B'] - self.χ_A)
         else:
             result['Δχ'] = None
         
-        # Концентрация кислородных вакансий
+        # NEW: Electronegativity difference between B-site and oxygen
+        if result['χ_avg_B'] is not None and self.χ_O is not None:
+            result['electronegativity_difference_B_O'] = abs(result['χ_avg_B'] - self.χ_O)
+        else:
+            result['electronegativity_difference_B_O'] = None
+        
+        # Oxygen vacancy concentration
         result['oxygen_vacancy_conc'] = y / 2 if y is not None else None
         
-        # Молярная масса
+        # Molar mass calculation
         M_A = self.get_atomic_mass(self.a_element)
         M_B1 = self.get_atomic_mass(b1_element)
         M_B2 = self.get_atomic_mass(b2_element) if not pd.isna(b2_element) and b2_element != '' else None
@@ -474,7 +724,7 @@ class ConductivityDescriptorCalculator:
         else:
             result['molar_mass'] = None
         
-        # Базовая структура для теоретической плотности
+        # Base structure for theoretical density (Vegard's law approximation)
         base_compound = f"{self.a_element}{b1_element}O3"
         base_props = MATERIAL_PROPERTIES.get(base_compound, None)
         if base_props is not None:
@@ -486,41 +736,45 @@ class ConductivityDescriptorCalculator:
     
     def calculate_microstructure_descriptors(self, density_percent, grain_size_um):
         """
-        Расчет микроструктурных дескрипторов
+        Calculate microstructural descriptors.
         
         Parameters
         ----------
         density_percent : float
-            Относительная плотность в процентах
+            Relative density in percent
         grain_size_um : float
-            Размер зерен в микрометрах
+            Grain size in micrometers
         
         Returns
         -------
         dict
-            Словарь с микроструктурными дескрипторами
+            Dictionary with microstructural descriptors
         """
+        # Safe conversion
+        density_percent_safe = safe_float_converter(density_percent)
+        grain_size_um_safe = safe_float_converter(grain_size_um)
+        
         descriptors = {}
         
-        # Плотность
-        if density_percent is not None and not pd.isna(density_percent):
-            descriptors['density_percent'] = density_percent
-            descriptors['density_fraction'] = density_percent / 100.0
+        # Density
+        if density_percent_safe is not None and not pd.isna(density_percent_safe):
+            descriptors['density_percent'] = density_percent_safe
+            descriptors['density_fraction'] = density_percent_safe / 100.0
             descriptors['porosity'] = 1.0 - descriptors['density_fraction']
         else:
             descriptors['density_percent'] = None
             descriptors['density_fraction'] = None
             descriptors['porosity'] = None
         
-        # Размер зерен
-        if grain_size_um is not None and not pd.isna(grain_size_um) and grain_size_um > 0:
-            descriptors['grain_size_um'] = grain_size_um
-            # Расчет S/V - площади контакта зерен на единицу объема
+        # Grain size
+        if grain_size_um_safe is not None and not pd.isna(grain_size_um_safe) and grain_size_um_safe > 0:
+            descriptors['grain_size_um'] = grain_size_um_safe
+            # S/V ratio calculation - grain boundary area per unit volume
             # S/V = 9/4 * (4/3)^(2/3) * 1/req * π^(-1/3) ≈ 1.861 / req
-            # где req - эквивалентный радиус сферического зерна
-            req = grain_size_um / 2.0  # радиус в мкм
-            descriptors['S_V_ratio'] = 1.861 / req  # мкм⁻¹
-            # В м⁻¹ для физических расчетов
+            # where req is the equivalent radius of spherical grain
+            req = grain_size_um_safe / 2.0  # radius in μm
+            descriptors['S_V_ratio'] = 1.861 / req  # μm⁻¹
+            # In m⁻¹ for physical calculations
             descriptors['S_V_ratio_m'] = descriptors['S_V_ratio'] * 1e6
         else:
             descriptors['grain_size_um'] = None
@@ -531,192 +785,183 @@ class ConductivityDescriptorCalculator:
     
     def calculate_sintering_additive_descriptors(self, additive_type, additive_concentration_wt):
         """
-        Расчет дескрипторов для спекающей добавки
+        Calculate descriptors for sintering additive.
         
         Parameters
         ----------
         additive_type : str
-            Тип добавки (Pure, Cu, Ni, Zn, Co)
+            Additive type (Pure, Cu, Ni, Zn, Co)
         additive_concentration_wt : float
-            Концентрация добавки в масс.%
+            Additive concentration in wt%
         
         Returns
         -------
         dict
-            Словарь с дескрипторами добавки
+            Dictionary with additive descriptors
         """
+        # Safe conversion
+        additive_type_safe = additive_type if not pd.isna(additive_type) else 'Pure'
+        additive_conc_safe = safe_float_converter(additive_concentration_wt) or 0.0
+        
         descriptors = {
-            'additive_type': additive_type if not pd.isna(additive_type) else 'Pure',
-            'additive_concentration_wt': additive_concentration_wt if not pd.isna(additive_concentration_wt) else 0.0,
-            'is_pure': True if (pd.isna(additive_type) or additive_type == 'Pure' or additive_concentration_wt == 0) else False
+            'additive_type': additive_type_safe,
+            'additive_concentration_wt': additive_conc_safe,
+            'is_pure': True if (additive_type_safe == 'Pure' or additive_conc_safe == 0) else False
         }
         
         if not descriptors['is_pure']:
-            # Ионный радиус катиона добавки
-            descriptors['additive_radius'] = self.get_ionic_radius(additive_type, 2, 6)
-            # Электроотрицательность
-            descriptors['additive_electronegativity'] = self.get_electronegativity(additive_type)
-            # Заряд
-            descriptors['additive_charge'] = self.get_charge(additive_type)
-            # Атомная масса
-            descriptors['additive_atomic_mass'] = self.get_atomic_mass(additive_type)
+            # Ionic radius of additive cation
+            descriptors['additive_radius'] = self.get_ionic_radius(additive_type_safe, 2, 6)
+            # Electronegativity
+            descriptors['additive_electronegativity'] = self.get_electronegativity(additive_type_safe)
+            # Charge
+            descriptors['additive_charge'] = self.get_charge(additive_type_safe)
+            # Atomic mass
+            descriptors['additive_atomic_mass'] = self.get_atomic_mass(additive_type_safe)
+            # NEW: Incorporation likelihood (from literature)
+            descriptors['additive_incorporation_likely'] = ADDITIVE_INCORPORATION.get(additive_type_safe, False)
         else:
             descriptors['additive_radius'] = None
             descriptors['additive_electronegativity'] = None
             descriptors['additive_charge'] = None
             descriptors['additive_atomic_mass'] = None
+            descriptors['additive_incorporation_likely'] = True  # Pure has no segregation issue
         
         return descriptors
 
+
 # ============================================================================
-# НОВЫЙ КЛАСС: ОБРАБОТЧИК ДАННЫХ ПРОВОДИМОСТИ
+# NEW CLASS: CONDUCTIVITY DATA PROCESSOR (ENHANCED)
 # ============================================================================
 class ConductivityDataProcessor:
-    """Класс для обработки данных проводимости протонпроводящих оксидов"""
+    """
+    Class for processing conductivity data of proton-conducting oxides.
+    
+    This enhanced version includes:
+    - Flexible column mapping
+    - Outlier detection
+    - Progress tracking
+    """
     
     def __init__(self):
+        """Initialize the data processor with temperatures and column mapper."""
         self.temperatures = [200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900]
         self.calculator = ConductivityDescriptorCalculator(a_element='Ba')
+        self.column_mapper = FlexibleColumnMapper()
     
-    def extract_conductivity_data(self, row, sigma_cols_prefix='σ total, mS'):
+    def extract_conductivity_data(self, row, col_type='sigma_total'):
         """
-        Извлечение данных проводимости из строки
+        Extract conductivity data from a row using flexible column mapping.
         
         Parameters
         ----------
         row : pandas.Series
-            Строка с данными
-        sigma_cols_prefix : str
-            Префикс колонок с проводимостью
+            Row with data
+        col_type : str
+            Type of conductivity ('sigma_total', 'sigma_bulk', 'sigma_gb')
         
         Returns
         -------
         list of dict
-            Список с данными проводимости при разных температурах
+            List with conductivity data at different temperatures
         """
         conductivity_data = []
         
-        for i, T in enumerate(self.temperatures):
-            # Поиск колонки с проводимостью
-            sigma_col = None
-            for col in row.index:
-                if sigma_cols_prefix in str(col) and str(T) in str(col):
-                    sigma_col = col
-                    break
+        for T in self.temperatures:
+            # Find column using flexible mapper
+            col_name = self.column_mapper.find_column(row.to_frame().T, col_type, T)
             
-            if sigma_col is not None:
-                sigma_value = row[sigma_col]
+            if col_name is not None:
+                sigma_value = row[col_name]
                 if not pd.isna(sigma_value) and sigma_value != '' and sigma_value is not None:
                     try:
-                        sigma_val = float(sigma_value)
-                        conductivity_data.append({
-                            'temperature_K': T + 273.15,
-                            'temperature_C': T,
-                            'sigma_total': sigma_val,
-                            'sigma_total_mS': sigma_val,
-                            'sigma_total_S_cm': sigma_val / 1000.0 if sigma_val is not None else None
-                        })
+                        sigma_val = safe_float_converter(sigma_value)
+                        if sigma_val is not None:
+                            conductivity_data.append({
+                                'temperature_K': T + 273.15,
+                                'temperature_C': T,
+                                f'sigma_{col_type.replace("sigma_", "")}': sigma_val,
+                                f'sigma_{col_type.replace("sigma_", "")}_mS': sigma_val,
+                                f'sigma_{col_type.replace("sigma_", "")}_S_cm': sigma_val / 1000.0
+                            })
                     except (ValueError, TypeError):
                         pass
         
         return conductivity_data
     
-    def extract_bulk_conductivity_data(self, row):
-        """Извлечение объемной проводимости из строки"""
-        bulk_data = []
+    def detect_outliers_iqr(self, data, column, multiplier=1.5):
+        """
+        Detect outliers using IQR method.
         
-        for i, T in enumerate(self.temperatures):
-            bulk_col = None
-            for col in row.index:
-                if 'σ bulk, mS' in str(col) and str(T) in str(col):
-                    bulk_col = col
-                    break
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Data to analyze
+        column : str
+            Column name to check for outliers
+        multiplier : float
+            IQR multiplier (default: 1.5)
             
-            if bulk_col is not None:
-                bulk_value = row[bulk_col]
-                if not pd.isna(bulk_value) and bulk_value != '' and bulk_value is not None:
-                    try:
-                        bulk_val = float(bulk_value)
-                        bulk_data.append({
-                            'temperature_K': T + 273.15,
-                            'temperature_C': T,
-                            'sigma_bulk': bulk_val,
-                            'sigma_bulk_mS': bulk_val,
-                            'sigma_bulk_S_cm': bulk_val / 1000.0 if bulk_val is not None else None
-                        })
-                    except (ValueError, TypeError):
-                        pass
+        Returns
+        -------
+        pandas.Series
+            Boolean mask where True indicates outlier
+        """
+        if column not in data.columns:
+            return pd.Series([False] * len(data), index=data.index)
         
-        return bulk_data
-    
-    def extract_gb_conductivity_data(self, row):
-        """Извлечение зернограничной проводимости из строки"""
-        gb_data = []
+        Q1 = data[column].quantile(0.25)
+        Q3 = data[column].quantile(0.75)
+        IQR = Q3 - Q1
         
-        for i, T in enumerate(self.temperatures):
-            gb_col = None
-            for col in row.index:
-                if 'σ gb, mS' in str(col) and str(T) in str(col):
-                    gb_col = col
-                    break
-            
-            if gb_col is not None:
-                gb_value = row[gb_col]
-                if not pd.isna(gb_value) and gb_value != '' and gb_value is not None:
-                    try:
-                        gb_val = float(gb_value)
-                        gb_data.append({
-                            'temperature_K': T + 273.15,
-                            'temperature_C': T,
-                            'sigma_gb': gb_val,
-                            'sigma_gb_mS': gb_val,
-                            'sigma_gb_S_cm': gb_val / 1000.0 if gb_val is not None else None
-                        })
-                    except (ValueError, TypeError):
-                        pass
+        lower_bound = Q1 - multiplier * IQR
+        upper_bound = Q3 + multiplier * IQR
         
-        return gb_data
+        return (data[column] < lower_bound) | (data[column] > upper_bound)
     
     def calculate_arrhenius_params(self, sigma_data):
         """
-        Расчет параметров Аррениуса из данных проводимости
+        Calculate Arrhenius parameters from conductivity data.
         
         Parameters
         ----------
         sigma_data : list of dict
-            Данные проводимости при разных температурах
+            Conductivity data at different temperatures
         
         Returns
         -------
         dict
-            Параметры Аррениуса: Ea, A, R²
+            Arrhenius parameters: Ea, A, R²
         """
         if len(sigma_data) < 3:
             return {'Ea': None, 'A': None, 'R2': None, 'has_data': False}
         
-        # Преобразование для графика Аррениуса: ln(σT) vs 1000/T
+        # Transform for Arrhenius plot: ln(σT) vs 1000/T
         temps = []
         ln_sigmaT = []
         
         for data in sigma_data:
             T_K = data['temperature_K']
-            sigma = data['sigma_total']
-            if sigma is not None and sigma > 0 and T_K > 0:
-                ln_val = np.log(sigma * T_K)
-                if np.isfinite(ln_val):
-                    ln_sigmaT.append(ln_val)
-                    temps.append(1000.0 / T_K)
+            # Get the sigma value (key may vary)
+            sigma_key = [k for k in data.keys() if 'sigma' in k and 'mS' in k][0] if data else None
+            if sigma_key:
+                sigma = data[sigma_key]
+                if sigma is not None and sigma > 0 and T_K > 0:
+                    ln_val = np.log(sigma * T_K)
+                    if np.isfinite(ln_val):
+                        ln_sigmaT.append(ln_val)
+                        temps.append(1000.0 / T_K)
         
         if len(temps) < 3:
             return {'Ea': None, 'A': None, 'R2': None, 'has_data': False}
         
-        # Линейная регрессия
+        # Linear regression
         slope, intercept, r_value, p_value, std_err = stats.linregress(temps, ln_sigmaT)
         
-        # Ea = slope * R (где R = 8.314 кДж/(моль·К) = 0.008314 кДж/(моль·К))
-        # Для удобства Ea в эВ: 1 эВ = 96.485 кДж/моль
-        Ea_kJ = slope * GAS_CONSTANT / 1000.0  # кДж/моль
-        Ea_eV = Ea_kJ / 96.485  # эВ
+        # Ea = slope * R (where R = 8.314 J/(mol·K) = 0.008314 kJ/(mol·K))
+        # For convenience, Ea in eV: 1 eV = 96.485 kJ/mol
+        Ea_kJ = slope * GAS_CONSTANT / 1000.0  # kJ/mol
+        Ea_eV = Ea_kJ / 96.485  # eV
         
         return {
             'Ea': Ea_eV,
@@ -729,20 +974,46 @@ class ConductivityDataProcessor:
     
     def calculate_gb_contribution(self, sigma_total_data, sigma_bulk_data, sigma_gb_data):
         """
-        Расчет вклада зернограничной проводимости
+        Calculate grain boundary contribution to total resistance.
+        
+        Parameters
+        ----------
+        sigma_total_data : list of dict
+            Total conductivity data
+        sigma_bulk_data : list of dict
+            Bulk conductivity data
+        sigma_gb_data : list of dict
+            Grain boundary conductivity data
         
         Returns
         -------
         dict
-            Относительный вклад зернограничной проводимости
+            Relative contribution of grain boundary conductivity
         """
         result = {}
         
         if sigma_total_data and sigma_bulk_data and sigma_gb_data:
-            # Создаем словари по температурам
-            total_by_T = {d['temperature_C']: d['sigma_total'] for d in sigma_total_data}
-            bulk_by_T = {d['temperature_C']: d['sigma_bulk'] for d in sigma_bulk_data}
-            gb_by_T = {d['temperature_C']: d['sigma_gb'] for d in sigma_gb_data}
+            # Create dictionaries by temperature
+            total_by_T = {}
+            for d in sigma_total_data:
+                T = d.get('temperature_C')
+                sigma_key = [k for k in d.keys() if 'sigma' in k and 'mS' in k][0] if d else None
+                if T is not None and sigma_key:
+                    total_by_T[T] = d[sigma_key]
+            
+            bulk_by_T = {}
+            for d in sigma_bulk_data:
+                T = d.get('temperature_C')
+                sigma_key = [k for k in d.keys() if 'sigma' in k and 'mS' in k][0] if d else None
+                if T is not None and sigma_key:
+                    bulk_by_T[T] = d[sigma_key]
+            
+            gb_by_T = {}
+            for d in sigma_gb_data:
+                T = d.get('temperature_C')
+                sigma_key = [k for k in d.keys() if 'sigma' in k and 'mS' in k][0] if d else None
+                if T is not None and sigma_key:
+                    gb_by_T[T] = d[sigma_key]
             
             for T in total_by_T.keys():
                 if T in bulk_by_T and T in gb_by_T:
@@ -751,7 +1022,7 @@ class ConductivityDataProcessor:
                     sigma_gb = gb_by_T[T]
                     
                     if sigma_total is not None and sigma_total > 0:
-                        # Расчет сопротивлений
+                        # Resistance calculation
                         R_total = 1.0 / sigma_total
                         R_bulk = 1.0 / sigma_bulk if sigma_bulk is not None and sigma_bulk > 0 else None
                         R_gb = 1.0 / sigma_gb if sigma_gb is not None and sigma_gb > 0 else None
@@ -770,45 +1041,305 @@ class ConductivityDataProcessor:
         
         return result
 
+
 # ============================================================================
-# ФУНКЦИИ ДЛЯ ПРОЦЕССИНГА ДАННЫХ ПРОВОДИМОСТИ
+# NEW FUNCTIONS FOR ENHANCED ANALYSIS
 # ============================================================================
-@st.cache_data
-def process_conductivity_data(df):
+
+def partial_correlation_analysis(df, target, features, control_variables):
     """
-    Основная функция обработки данных проводимости
+    Calculate partial correlations between target and features, controlling for variables.
     
     Parameters
     ----------
     df : pandas.DataFrame
-        Исходные данные
+        Data
+    target : str
+        Target variable name
+    features : list
+        List of feature variable names
+    control_variables : list
+        List of control variable names
     
     Returns
     -------
     pandas.DataFrame
-        Обработанные данные в длинном формате
+        DataFrame with partial correlations and p-values
     """
+    results = []
+    
+    for feature in features:
+        if feature not in df.columns or target not in df.columns:
+            continue
+        
+        # Drop NaN values
+        all_vars = [target, feature] + control_variables
+        clean_df = df[all_vars].dropna()
+        
+        if len(clean_df) < 5:
+            results.append({
+                'feature': feature,
+                'partial_correlation': np.nan,
+                'p_value': np.nan,
+                'n_points': len(clean_df)
+            })
+            continue
+        
+        # Calculate residuals for target and feature after regressing out controls
+        if len(control_variables) > 0:
+            # Regress target on controls
+            X_controls = clean_df[control_variables].values
+            y_target = clean_df[target].values
+            y_feature = clean_df[feature].values
+            
+            # Add constant term
+            X_controls = np.column_stack([np.ones(len(X_controls)), X_controls])
+            
+            try:
+                # Linear regression for target
+                beta_target = np.linalg.lstsq(X_controls, y_target, rcond=None)[0]
+                residual_target = y_target - X_controls @ beta_target
+                
+                # Linear regression for feature
+                beta_feature = np.linalg.lstsq(X_controls, y_feature, rcond=None)[0]
+                residual_feature = y_feature - X_controls @ beta_feature
+                
+                # Correlation of residuals
+                corr, p_val = pearsonr(residual_target, residual_feature)
+            except:
+                corr, p_val = np.nan, np.nan
+        else:
+            # Simple correlation if no control variables
+            corr, p_val = pearsonr(clean_df[target], clean_df[feature])
+        
+        results.append({
+            'feature': feature,
+            'partial_correlation': corr,
+            'p_value': p_val,
+            'n_points': len(clean_df)
+        })
+    
+    return pd.DataFrame(results)
+
+
+def polynomial_regression_analysis(df, x_col, y_col, degree=2):
+    """
+    Perform polynomial regression analysis.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data
+    x_col : str
+        Independent variable column
+    y_col : str
+        Dependent variable column
+    degree : int
+        Polynomial degree (default: 2)
+    
+    Returns
+    -------
+    dict
+        Regression results including model, predictions, and R²
+    """
+    clean_df = df[[x_col, y_col]].dropna()
+    
+    if len(clean_df) < degree + 2:
+        return {
+            'model': None,
+            'x_pred': None,
+            'y_pred': None,
+            'r2': None,
+            'coefficients': None
+        }
+    
+    X = clean_df[x_col].values.reshape(-1, 1)
+    y = clean_df[y_col].values
+    
+    # Create polynomial features
+    poly = PolynomialFeatures(degree=degree, include_bias=False)
+    X_poly = poly.fit_transform(X)
+    
+    # Fit model
+    model = LinearRegression()
+    model.fit(X_poly, y)
+    
+    # Predictions
+    y_pred = model.predict(X_poly)
+    r2 = r2_score(y, y_pred)
+    
+    # Generate smooth curve for plotting
+    x_range = np.linspace(X.min(), X.max(), 100)
+    x_range_poly = poly.transform(x_range.reshape(-1, 1))
+    y_range_pred = model.predict(x_range_poly)
+    
+    return {
+        'model': model,
+        'x_pred': x_range,
+        'y_pred': y_range_pred,
+        'r2': r2,
+        'coefficients': model.coef_,
+        'intercept': model.intercept_
+    }
+
+
+def cluster_materials_by_properties(df, feature_columns, eps=0.5, min_samples=3):
+    """
+    Cluster materials using DBSCAN based on their properties.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data (long format, will be pivoted)
+    feature_columns : list
+        List of feature columns to use for clustering
+    eps : float
+        DBSCAN epsilon parameter
+    min_samples : int
+        DBSCAN minimum samples parameter
+    
+    Returns
+    -------
+    pandas.DataFrame
+        Data with cluster labels
+    """
+    # Aggregate by sample_id
+    agg_df = df.groupby('sample_id')[feature_columns].mean().dropna()
+    
+    if len(agg_df) < 3:
+        return None, None
+    
+    # Standardize features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(agg_df)
+    
+    # Perform DBSCAN clustering
+    clustering = DBSCAN(eps=eps, min_samples=min_samples)
+    cluster_labels = clustering.fit_predict(X_scaled)
+    
+    # Add cluster labels to dataframe
+    agg_df['cluster'] = cluster_labels
+    
+    return agg_df, scaler
+
+
+def shap_analysis(df, features, target, model_type='xgboost'):
+    """
+    Perform SHAP analysis for model interpretability.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data
+    features : list
+        Feature columns
+    target : str
+        Target column
+    model_type : str
+        Model type ('xgboost' or 'random_forest')
+    
+    Returns
+    -------
+    dict
+        SHAP values, model, and explainer
+    """
+    # Prepare data
+    clean_df = df[features + [target]].dropna()
+    
+    if len(clean_df) < 10:
+        return None
+    
+    X = clean_df[features].values
+    y = clean_df[target].values
+    feature_names = features
+    
+    # Train model
+    if model_type == 'xgboost':
+        model = xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
+    else:
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+    
+    model.fit(X, y)
+    
+    # Create SHAP explainer
+    if model_type == 'xgboost':
+        explainer = shap.TreeExplainer(model)
+    else:
+        explainer = shap.TreeExplainer(model)
+    
+    shap_values = explainer.shap_values(X)
+    
+    return {
+        'model': model,
+        'explainer': explainer,
+        'shap_values': shap_values,
+        'X': X,
+        'feature_names': feature_names,
+        'y': y
+    }
+
+
+# ============================================================================
+# ENHANCED DATA PROCESSING FUNCTION
+# ============================================================================
+@st.cache_data
+def process_conductivity_data(df, progress_bar=None):
+    """
+    Main function for processing conductivity data.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Source data
+    progress_bar : st.progress, optional
+        Progress bar for tracking
+    
+    Returns
+    -------
+    tuple
+        (long_format_df, wide_format_df) processed data
+    """
+    if progress_bar:
+        progress_bar.progress(0, text="Starting data processing...")
+    
     df_processed = df.copy()
+    
+    # Preprocess: fill NaN values with 0 for numeric columns where appropriate
+    numeric_cols = ['B2_cont', 'dop_cont', 'x, wt%']
+    for col in numeric_cols:
+        if col in df_processed.columns:
+            df_processed[col] = df_processed[col].apply(safe_float_converter)
+            df_processed[col] = df_processed[col].fillna(0)
+    
+    if progress_bar:
+        progress_bar.progress(0.1, text="Creating processor...")
+    
     processor = ConductivityDataProcessor()
     
-    # Создаем список для хранения данных в длинном формате
+    # Create list for storing data in long format
     long_format_data = []
     
-    # Перебираем строки
+    total_rows = len(df_processed)
+    
+    # Iterate through rows
     for idx, row in df_processed.iterrows():
-        # Базовые параметры состава
+        if progress_bar:
+            progress_bar.progress(0.1 + 0.4 * (idx / total_rows), 
+                                 text=f"Processing sample {idx+1}/{total_rows}...")
+        
+        # Basic composition parameters
         a_cation = row.get('A cation', 'Ba')
         b1_cation = row.get('B1 cation', None)
         b2_cation = row.get('B2 cation', None)
-        b2_cont = row.get('B2_cont', None)
+        b2_cont = row.get('B2_cont', 0)
         dopant = row.get('dopant', None)
-        dop_cont = row.get('dop_cont', None)
+        dop_cont = row.get('dop_cont', 0)
         
-        # Спекающая добавка
+        # Sintering additive
         additive_type = row.get('Сд', 'Pure')
         additive_conc = row.get('x, wt%', 0.0)
         
-        # Параметры синтеза
+        # Synthesis parameters
         method = row.get('Method', None)
         T_sin = row.get('T sin', None)
         structure = row.get('Structure', None)
@@ -819,15 +1350,19 @@ def process_conductivity_data(df):
         density_percent = row.get('ρ, %', None)
         grain_size_um = row.get('d, mkm', None)
         
-        # Условия измерений
+        # Measurement conditions
         atmosphere = row.get('Атмосфера', None)
         humidity = row.get('Влажность', None)
         doi = row.get('ссылка', None)
         
-        # Ea из таблицы (если есть)
+        # Ea from table (if available)
         Ea_table = row.get('Ea, эВ', None)
         
-        # Расчет дескрипторов состава
+        # Update calculator's A-element if different
+        if a_cation != processor.calculator.a_element:
+            processor.calculator = ConductivityDescriptorCalculator(a_element=a_cation)
+        
+        # Calculate composition descriptors
         if b1_cation is not None and not pd.isna(b1_cation):
             formula_desc = processor.calculator.calculate_formula(
                 b1_cation, b2_cation, b2_cont, dopant, dop_cont
@@ -835,31 +1370,33 @@ def process_conductivity_data(df):
         else:
             formula_desc = {}
         
-        # Расчет микроструктурных дескрипторов
+        # Calculate microstructural descriptors
         micro_desc = processor.calculator.calculate_microstructure_descriptors(
             density_percent, grain_size_um
         )
         
-        # Расчет дескрипторов спекающей добавки
+        # Calculate sintering additive descriptors
         additive_desc = processor.calculator.calculate_sintering_additive_descriptors(
             additive_type, additive_conc
         )
         
-        # Извлечение данных проводимости
-        sigma_total_data = processor.extract_conductivity_data(row, 'σ total, mS')
-        sigma_bulk_data = processor.extract_bulk_conductivity_data(row)
-        sigma_gb_data = processor.extract_gb_conductivity_data(row)
+        # Extract conductivity data
+        sigma_total_data = processor.extract_conductivity_data(row, 'sigma_total')
+        sigma_bulk_data = processor.extract_conductivity_data(row, 'sigma_bulk')
+        sigma_gb_data = processor.extract_conductivity_data(row, 'sigma_gb')
         
-        # Расчет параметров Аррениуса
+        # Calculate Arrhenius parameters
         arrhenius = processor.calculate_arrhenius_params(sigma_total_data)
         
-        # Расчет вклада зернограничной проводимости
+        # Calculate grain boundary contribution
         gb_contribution = processor.calculate_gb_contribution(
             sigma_total_data, sigma_bulk_data, sigma_gb_data
         )
         
-        # Добавляем записи в длинный формат
+        # Add records to long format
         for sigma_data in sigma_total_data:
+            T_C = sigma_data['temperature_C']
+            
             record = {
                 'sample_id': idx,
                 'A_cation': a_cation,
@@ -873,6 +1410,7 @@ def process_conductivity_data(df):
                 'is_pure': additive_desc['is_pure'],
                 'additive_radius': additive_desc.get('additive_radius'),
                 'additive_electronegativity': additive_desc.get('additive_electronegativity'),
+                'additive_incorporation_likely': additive_desc.get('additive_incorporation_likely'),
                 'method': method,
                 'T_sin': T_sin,
                 'structure': structure,
@@ -880,7 +1418,7 @@ def process_conductivity_data(df):
                 'a_latt': a_latt,
                 'b_latt': b_latt,
                 'c_latt': c_latt,
-                'density_percent': density_percent,
+                'density_percent': micro_desc['density_percent'],
                 'density_fraction': micro_desc['density_fraction'],
                 'porosity': micro_desc['porosity'],
                 'grain_size_um': grain_size_um,
@@ -895,130 +1433,162 @@ def process_conductivity_data(df):
                 'arrhenius_n_points': arrhenius.get('n_points', 0),
                 'temperature_C': sigma_data['temperature_C'],
                 'temperature_K': sigma_data['temperature_K'],
-                'sigma_total_mS': sigma_data['sigma_total'],
-                'sigma_total_S_cm': sigma_data['sigma_total_S_cm'],
+                'sigma_total_mS': sigma_data.get('sigma_total_mS'),
+                'sigma_total_S_cm': sigma_data.get('sigma_total_S_cm'),
             }
             
-            # Добавляем объемную проводимость, если есть
-            bulk_at_T = next((b for b in sigma_bulk_data if b['temperature_C'] == sigma_data['temperature_C']), None)
+            # Add bulk conductivity if available
+            bulk_at_T = next((b for b in sigma_bulk_data if b['temperature_C'] == T_C), None)
             if bulk_at_T:
-                record['sigma_bulk_mS'] = bulk_at_T['sigma_bulk']
-                record['sigma_bulk_S_cm'] = bulk_at_T['sigma_bulk_S_cm']
+                record['sigma_bulk_mS'] = bulk_at_T.get('sigma_bulk_mS')
+                record['sigma_bulk_S_cm'] = bulk_at_T.get('sigma_bulk_S_cm')
             else:
                 record['sigma_bulk_mS'] = None
                 record['sigma_bulk_S_cm'] = None
             
-            # Добавляем зернограничную проводимость, если есть
-            gb_at_T = next((g for g in sigma_gb_data if g['temperature_C'] == sigma_data['temperature_C']), None)
+            # Add grain boundary conductivity if available
+            gb_at_T = next((g for g in sigma_gb_data if g['temperature_C'] == T_C), None)
             if gb_at_T:
-                record['sigma_gb_mS'] = gb_at_T['sigma_gb']
-                record['sigma_gb_S_cm'] = gb_at_T['sigma_gb_S_cm']
+                record['sigma_gb_mS'] = gb_at_T.get('sigma_gb_mS')
+                record['sigma_gb_S_cm'] = gb_at_T.get('sigma_gb_S_cm')
             else:
                 record['sigma_gb_mS'] = None
                 record['sigma_gb_S_cm'] = None
             
-            # Добавляем вклад зернограничной проводимости
-            if sigma_data['temperature_C'] in gb_contribution:
-                record['gb_resistance_fraction'] = gb_contribution[sigma_data['temperature_C']]['gb_resistance_fraction']
-                record['bulk_resistance_fraction'] = gb_contribution[sigma_data['temperature_C']]['bulk_resistance_fraction']
+            # Add grain boundary contribution
+            if T_C in gb_contribution:
+                record['gb_resistance_fraction'] = gb_contribution[T_C]['gb_resistance_fraction']
+                record['bulk_resistance_fraction'] = gb_contribution[T_C]['bulk_resistance_fraction']
             else:
                 record['gb_resistance_fraction'] = None
                 record['bulk_resistance_fraction'] = None
             
-            # Добавляем геометрические дескрипторы
+            # Add geometric descriptors (NEW)
             record['r_avg_B'] = formula_desc.get('r_avg_B')
+            record['radius_mismatch'] = formula_desc.get('radius_mismatch')
             record['tolerance_factor'] = formula_desc.get('tolerance_factor')
+            record['lattice_distortion_index'] = formula_desc.get('lattice_distortion_index')
             record['χ_avg_B'] = formula_desc.get('χ_avg_B')
             record['Δχ'] = formula_desc.get('Δχ')
+            record['electronegativity_difference_B_O'] = formula_desc.get('electronegativity_difference_B_O')
             record['oxygen_vacancy_conc'] = formula_desc.get('oxygen_vacancy_conc')
             record['molar_mass'] = formula_desc.get('molar_mass')
             record['theoretical_density'] = formula_desc.get('theoretical_density')
             
             long_format_data.append(record)
     
-    # Создаем DataFrame в длинном формате
+    if progress_bar:
+        progress_bar.progress(0.6, text="Creating long format DataFrame...")
+    
+    # Create long format DataFrame
     long_df = pd.DataFrame(long_format_data)
     
-    # Создаем также широкий формат для некоторых анализов
+    # Detect outliers in conductivity
+    if 'sigma_total_mS' in long_df.columns:
+        outlier_mask = ConductivityDataProcessor().detect_outliers_iqr(long_df, 'sigma_total_mS')
+        long_df['is_outlier'] = outlier_mask
+    else:
+        long_df['is_outlier'] = False
+    
+    if progress_bar:
+        progress_bar.progress(0.8, text="Creating wide format from long format...")
+    
+    # Create wide format FROM long format (not recalculating)
+    # This eliminates the double calculation issue
     wide_format_data = []
-    for idx, row in df_processed.iterrows():
+    
+    for sample_id in long_df['sample_id'].unique():
+        sample_data = long_df[long_df['sample_id'] == sample_id]
+        
+        # Take first row for non-temperature dependent fields
+        first_row = sample_data.iloc[0]
+        
         wide_record = {
-            'sample_id': idx,
-            'A_cation': row.get('A cation', 'Ba'),
-            'B1_cation': row.get('B1 cation', None),
-            'B2_cation': row.get('B2 cation', None),
-            'B2_cont': row.get('B2_cont', None),
-            'dopant': row.get('dopant', None),
-            'dop_cont': row.get('dop_cont', None),
-            'additive_type': row.get('Сд', 'Pure'),
-            'additive_concentration_wt': row.get('x, wt%', 0.0),
-            'method': row.get('Method', None),
-            'T_sin': row.get('T sin', None),
-            'structure': row.get('Structure', None),
-            'space_group': row.get('Space group', None),
-            'a_latt': row.get('a, Å', None),
-            'b_latt': row.get('b, Å', None),
-            'c_latt': row.get('c, Å', None),
-            'density_percent': row.get('ρ, %', None),
-            'grain_size_um': row.get('d, mkm', None),
-            'atmosphere': row.get('Атмосфера', None),
-            'humidity': row.get('Влажность', None),
-            'doi': row.get('ссылка', None),
-            'Ea_table': row.get('Ea, эВ', None),
+            'sample_id': sample_id,
+            'A_cation': first_row.get('A_cation'),
+            'B1_cation': first_row.get('B1_cation'),
+            'B2_cation': first_row.get('B2_cation'),
+            'B2_cont': first_row.get('B2_cont'),
+            'dopant': first_row.get('dopant'),
+            'dop_cont': first_row.get('dop_cont'),
+            'additive_type': first_row.get('additive_type'),
+            'additive_concentration_wt': first_row.get('additive_concentration_wt'),
+            'additive_incorporation_likely': first_row.get('additive_incorporation_likely'),
+            'method': first_row.get('method'),
+            'T_sin': first_row.get('T_sin'),
+            'structure': first_row.get('structure'),
+            'space_group': first_row.get('space_group'),
+            'a_latt': first_row.get('a_latt'),
+            'b_latt': first_row.get('b_latt'),
+            'c_latt': first_row.get('c_latt'),
+            'density_percent': first_row.get('density_percent'),
+            'grain_size_um': first_row.get('grain_size_um'),
+            'atmosphere': first_row.get('atmosphere'),
+            'humidity': first_row.get('humidity'),
+            'doi': first_row.get('doi'),
+            'Ea_table': first_row.get('Ea_table'),
+            'Ea_calculated': first_row.get('Ea_calculated'),
+            'Ea_calculated_kJ': first_row.get('Ea_calculated_kJ'),
+            'arrhenius_R2': first_row.get('arrhenius_R2'),
+            'r_avg_B': first_row.get('r_avg_B'),
+            'radius_mismatch': first_row.get('radius_mismatch'),
+            'tolerance_factor': first_row.get('tolerance_factor'),
+            'lattice_distortion_index': first_row.get('lattice_distortion_index'),
+            'oxygen_vacancy_conc': first_row.get('oxygen_vacancy_conc'),
         }
         
-        # Добавляем данные проводимости при разных температурах
-        processor_local = ConductivityDataProcessor()
-        sigma_total_data = processor_local.extract_conductivity_data(row, 'σ total, mS')
-        sigma_bulk_data = processor_local.extract_bulk_conductivity_data(row)
-        sigma_gb_data = processor_local.extract_gb_conductivity_data(row)
-        
-        for sigma_data in sigma_total_data:
-            T = sigma_data['temperature_C']
-            wide_record[f'sigma_total_{T}C'] = sigma_data['sigma_total']
-        
-        for bulk_data in sigma_bulk_data:
-            T = bulk_data['temperature_C']
-            wide_record[f'sigma_bulk_{T}C'] = bulk_data['sigma_bulk']
-        
-        for gb_data in sigma_gb_data:
-            T = gb_data['temperature_C']
-            wide_record[f'sigma_gb_{T}C'] = gb_data['sigma_gb']
-        
-        # Расчет Arrhenius
-        arrhenius = processor_local.calculate_arrhenius_params(sigma_total_data)
-        wide_record['Ea_calculated_eV'] = arrhenius['Ea']
-        wide_record['Ea_calculated_kJ'] = arrhenius['Ea_kJ']
-        wide_record['arrhenius_R2'] = arrhenius['R2']
+        # Add conductivity at each temperature
+        for _, temp_row in sample_data.iterrows():
+            T = temp_row['temperature_C']
+            sigma_total = temp_row.get('sigma_total_mS')
+            sigma_bulk = temp_row.get('sigma_bulk_mS')
+            sigma_gb = temp_row.get('sigma_gb_mS')
+            
+            if sigma_total is not None:
+                wide_record[f'sigma_total_{T}C'] = sigma_total
+            if sigma_bulk is not None:
+                wide_record[f'sigma_bulk_{T}C'] = sigma_bulk
+            if sigma_gb is not None:
+                wide_record[f'sigma_gb_{T}C'] = sigma_gb
         
         wide_format_data.append(wide_record)
     
     wide_df = pd.DataFrame(wide_format_data)
     
+    if progress_bar:
+        progress_bar.progress(1.0, text="Processing complete!")
+        time.sleep(0.5)
+    
     return long_df, wide_df
 
+
 # ============================================================================
-# ФУНКЦИИ ДЛЯ ПОСТРОЕНИЯ ГРАФИКОВ АНАЛИЗА ПРОВОДИМОСТИ
+# PLOTTING FUNCTIONS (all original plots preserved, new ones added)
 # ============================================================================
+
 def plot_conductivity_vs_temperature(df_long, ax, selected_additives=None, selected_b_sites=None, temperature_min=400, temperature_max=700):
-    """График 1: Проводимость как функция температуры для разных добавок"""
+    """Plot 1: Conductivity as function of temperature for different additives"""
     
     plot_df = df_long.copy()
     
-    # Фильтрация
+    # Filtering
     if selected_additives:
         plot_df = plot_df[plot_df['additive_type'].isin(selected_additives)]
     if selected_b_sites and 'B1_cation' in plot_df.columns:
         plot_df = plot_df[plot_df['B1_cation'].isin(selected_b_sites)]
     
-    # Фильтрация по температуре
+    # Filter by temperature
     plot_df = plot_df[(plot_df['temperature_C'] >= temperature_min) & (plot_df['temperature_C'] <= temperature_max)]
+    
+    # Exclude outliers if flag exists
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, 'No data for selected filters', ha='center', va='center')
         return ax
     
-    # Группировка для усреднения
+    # Grouping for averaging
     grouped = plot_df.groupby(['additive_type', 'temperature_C'])['sigma_total_mS'].agg(['mean', 'std', 'count']).reset_index()
     
     for additive in grouped['additive_type'].unique():
@@ -1048,7 +1618,7 @@ def plot_conductivity_vs_temperature(df_long, ax, selected_additives=None, selec
 
 
 def plot_arrhenius(df_long, ax, selected_additives=None, selected_b_sites=None):
-    """График 2: График Аррениуса ln(σT) vs 1000/T"""
+    """Plot 2: Arrhenius plot ln(σT) vs 1000/T"""
     
     plot_df = df_long.copy()
     
@@ -1057,7 +1627,11 @@ def plot_arrhenius(df_long, ax, selected_additives=None, selected_b_sites=None):
     if selected_b_sites and 'B1_cation' in plot_df.columns:
         plot_df = plot_df[plot_df['B1_cation'].isin(selected_b_sites)]
     
-    # Расчет ln(σT)
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
+    
+    # Calculate ln(σT)
     plot_df['ln_sigmaT'] = np.log(plot_df['sigma_total_mS'] * (plot_df['temperature_C'] + 273.15))
     plot_df['invT_1000'] = 1000.0 / (plot_df['temperature_C'] + 273.15)
     
@@ -1072,7 +1646,7 @@ def plot_arrhenius(df_long, ax, selected_additives=None, selected_b_sites=None):
         color = SINTERING_ADDITIVE_COLORS.get(additive, SINTERING_ADDITIVE_COLORS['default'])
         marker = SINTERING_ADDITIVE_MARKERS.get(additive, SINTERING_ADDITIVE_MARKERS['default'])
         
-        # Усреднение по температуре
+        # Averaging by temperature
         grouped = additive_data.groupby('invT_1000')['ln_sigmaT'].agg(['mean', 'std']).reset_index()
         
         ax.errorbar(
@@ -1097,15 +1671,19 @@ def plot_arrhenius(df_long, ax, selected_additives=None, selected_b_sites=None):
 
 
 def plot_additive_comparison_bar(df_long, ax, temperature=600):
-    """График 3: Сравнение проводимости разных добавок при фиксированной температуре"""
+    """Plot 3: Comparison of different additives at fixed temperature"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No data at {temperature}°C', ha='center', va='center')
         return ax
     
-    # Группировка по типу добавки
+    # Grouping by additive type
     grouped = plot_df.groupby('additive_type')['sigma_total_mS'].agg(['mean', 'std', 'count']).reset_index()
     grouped = grouped.sort_values('mean', ascending=False)
     
@@ -1125,7 +1703,7 @@ def plot_additive_comparison_bar(df_long, ax, temperature=600):
     ax.set_title(f'Conductivity Comparison at {temperature}°C')
     ax.grid(True, alpha=0.3, axis='y')
     
-    # Добавляем значения над столбцами
+    # Add values above bars
     for i, (_, row) in enumerate(grouped.iterrows()):
         ax.text(i, row['mean'] + row['std'] + 0.01, f'{row["mean"]:.3f}', ha='center', fontsize=8)
     
@@ -1133,10 +1711,14 @@ def plot_additive_comparison_bar(df_long, ax, temperature=600):
 
 
 def plot_conductivity_vs_additive_concentration(df_long, ax, temperature=600, b_site_filter=None):
-    """График 4: Зависимость проводимости от концентрации добавки"""
+    """Plot 4: Conductivity vs additive concentration"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df[plot_df['additive_concentration_wt'] > 0]
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if b_site_filter and 'B1_cation' in plot_df.columns:
         plot_df = plot_df[plot_df['B1_cation'].isin(b_site_filter)]
@@ -1152,7 +1734,7 @@ def plot_conductivity_vs_additive_concentration(df_long, ax, temperature=600, b_
         color = SINTERING_ADDITIVE_COLORS.get(additive, SINTERING_ADDITIVE_COLORS['default'])
         marker = SINTERING_ADDITIVE_MARKERS.get(additive, SINTERING_ADDITIVE_MARKERS['default'])
         
-        # Группировка по концентрации
+        # Grouping by concentration
         grouped = additive_data.groupby('additive_concentration_wt')['sigma_total_mS'].agg(['mean', 'std', 'count']).reset_index()
         
         ax.errorbar(
@@ -1177,33 +1759,38 @@ def plot_conductivity_vs_additive_concentration(df_long, ax, temperature=600, b_
 
 
 def plot_pure_vs_additive_comparison(df_long, ax, temperature=600):
-    """График 5: Сравнение Pure vs добавки (относительное улучшение)"""
+    """Plot 5: Pure vs additive comparison (relative improvement)"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No data at {temperature}°C', ha='center', va='center')
         return ax
     
-    # Получаем baseline для Pure
+    # Get baseline for Pure
     pure_data = plot_df[plot_df['additive_type'] == 'Pure']['sigma_total_mS'].mean()
     
     if pd.isna(pure_data) or pure_data == 0:
         ax.text(0.5, 0.5, 'No Pure reference data available', ha='center', va='center')
         return ax
     
-    # Расчет улучшения для каждой добавки
+    # Calculate improvement for each additive
     improvement_data = []
     for additive in plot_df['additive_type'].unique():
         if additive == 'Pure':
             continue
         additive_mean = plot_df[plot_df['additive_type'] == additive]['sigma_total_mS'].mean()
-        improvement = (additive_mean - pure_data) / pure_data * 100
-        improvement_data.append({
-            'additive': additive,
-            'improvement': improvement,
-            'mean_conductivity': additive_mean
-        })
+        if not pd.isna(additive_mean):
+            improvement = (additive_mean - pure_data) / pure_data * 100
+            improvement_data.append({
+                'additive': additive,
+                'improvement': improvement,
+                'mean_conductivity': additive_mean
+            })
     
     improvement_df = pd.DataFrame(improvement_data).sort_values('improvement', ascending=False)
     
@@ -1220,7 +1807,7 @@ def plot_pure_vs_additive_comparison(df_long, ax, temperature=600):
     ax.set_title(f'Conductivity Improvement: Additives vs Pure at {temperature}°C')
     ax.axvline(x=0, color='black', linestyle='-', linewidth=1)
     
-    # Добавляем значения
+    # Add values
     for i, (_, row) in enumerate(improvement_df.iterrows()):
         ax.text(row['improvement'] + 1, i, f'{row["improvement"]:.1f}%', va='center', fontsize=8)
     
@@ -1229,16 +1816,20 @@ def plot_pure_vs_additive_comparison(df_long, ax, temperature=600):
 
 
 def plot_bulk_vs_gb_contribution(df_long, ax, temperature=600):
-    """График 6: Сравнение объемной и зернограничной проводимости"""
+    """Plot 6: Comparison of bulk and grain boundary conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['sigma_bulk_mS', 'sigma_gb_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No bulk/gb data at {temperature}°C', ha='center', va='center')
         return ax
     
-    # Группировка по добавкам
+    # Grouping by additives
     grouped_bulk = plot_df.groupby('additive_type')['sigma_bulk_mS'].mean()
     grouped_gb = plot_df.groupby('additive_type')['sigma_gb_mS'].mean()
     
@@ -1260,16 +1851,20 @@ def plot_bulk_vs_gb_contribution(df_long, ax, temperature=600):
 
 
 def plot_gb_resistance_fraction(df_long, ax, temperature=600):
-    """График 7: Доля зернограничного сопротивления"""
+    """Plot 7: Grain boundary resistance fraction"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['gb_resistance_fraction'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No gb fraction data at {temperature}°C', ha='center', va='center')
         return ax
     
-    # Группировка по добавкам
+    # Grouping by additives
     grouped = plot_df.groupby('additive_type')['gb_resistance_fraction'].agg(['mean', 'std']).reset_index()
     grouped = grouped.sort_values('mean', ascending=False)
     
@@ -1294,10 +1889,14 @@ def plot_gb_resistance_fraction(df_long, ax, temperature=600):
 
 
 def plot_conductivity_vs_grain_size(df_long, ax, temperature=600):
-    """График 8: Зависимость проводимости от размера зерен"""
+    """Plot 8: Conductivity vs grain size"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['grain_size_um', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No grain size data at {temperature}°C', ha='center', va='center')
@@ -1329,10 +1928,14 @@ def plot_conductivity_vs_grain_size(df_long, ax, temperature=600):
 
 
 def plot_conductivity_vs_density(df_long, ax, temperature=600):
-    """График 9: Зависимость проводимости от плотности"""
+    """Plot 9: Conductivity vs density"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['density_percent', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No density data at {temperature}°C', ha='center', va='center')
@@ -1364,13 +1967,13 @@ def plot_conductivity_vs_density(df_long, ax, temperature=600):
 
 
 def plot_conductivity_heatmap(df_wide, ax, temperature=600):
-    """График 10: Тепловая карта проводимости (B-катион vs добавка)"""
+    """Plot 10: Conductivity heatmap (B-cation vs additive)"""
     
     if 'B1_cation' not in df_wide.columns or 'additive_type' not in df_wide.columns:
         ax.text(0.5, 0.5, 'Required columns missing', ha='center', va='center')
         return ax
     
-    # Создаем матрицу
+    # Create matrix
     pivot_data = []
     for _, row in df_wide.iterrows():
         b_cation = row.get('B1_cation')
@@ -1404,7 +2007,7 @@ def plot_conductivity_heatmap(df_wide, ax, temperature=600):
     ax.set_ylabel('B-cation')
     ax.set_title(f'Conductivity Heatmap at {temperature}°C (mS/cm)')
     
-    # Добавляем значения в ячейки
+    # Add values in cells
     for i in range(len(heatmap_data.index)):
         for j in range(len(heatmap_data.columns)):
             value = heatmap_data.values[i, j]
@@ -1417,16 +2020,17 @@ def plot_conductivity_heatmap(df_wide, ax, temperature=600):
 
 
 def plot_activation_energy_comparison(df_long, ax):
-    """График 11: Сравнение энергий активации для разных добавок"""
+    """Plot 11: Activation energy comparison for different additives"""
     
-    # Получаем уникальные образцы с рассчитанной Ea
+    # Get unique samples with calculated Ea
     samples = df_long[['sample_id', 'additive_type', 'Ea_calculated']].drop_duplicates().dropna(subset=['Ea_calculated'])
     
+    # Exclude outliers if flag exists (but Ea is per sample, not per measurement)
     if len(samples) == 0:
         ax.text(0.5, 0.5, 'No Ea data available', ha='center', va='center')
         return ax
     
-    # Группировка по добавкам
+    # Grouping by additives
     grouped = samples.groupby('additive_type')['Ea_calculated'].agg(['mean', 'std', 'count']).reset_index()
     grouped = grouped.sort_values('mean', ascending=False)
     
@@ -1450,10 +2054,14 @@ def plot_activation_energy_comparison(df_long, ax):
 
 
 def plot_t_sin_influence(df_long, ax, temperature=600):
-    """График 12: Влияние температуры спекания на проводимость"""
+    """Plot 12: Influence of sintering temperature on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['T_sin', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No sintering temperature data at {temperature}°C', ha='center', va='center')
@@ -1485,10 +2093,14 @@ def plot_t_sin_influence(df_long, ax, temperature=600):
 
 
 def plot_porosity_influence(df_long, ax, temperature=600):
-    """График 13: Влияние пористости на проводимость"""
+    """Plot 13: Influence of porosity on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['porosity', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No porosity data at {temperature}°C', ha='center', va='center')
@@ -1500,7 +2112,7 @@ def plot_porosity_influence(df_long, ax, temperature=600):
         marker = SINTERING_ADDITIVE_MARKERS.get(additive, SINTERING_ADDITIVE_MARKERS['default'])
         
         ax.scatter(
-            additive_data['porosity'] * 100,  # в процентах
+            additive_data['porosity'] * 100,  # in percent
             additive_data['sigma_total_mS'],
             color=color,
             marker=marker,
@@ -1520,10 +2132,14 @@ def plot_porosity_influence(df_long, ax, temperature=600):
 
 
 def plot_tolerance_factor_influence(df_long, ax, temperature=600):
-    """График 14: Влияние tolerance factor на проводимость"""
+    """Plot 14: Influence of tolerance factor on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['tolerance_factor', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No tolerance factor data at {temperature}°C', ha='center', va='center')
@@ -1547,6 +2163,7 @@ def plot_tolerance_factor_influence(df_long, ax, temperature=600):
         )
     
     ax.axvline(x=1.0, color='red', linestyle='--', alpha=0.5, label='Ideal cubic (t=1)')
+    ax.axvspan(0.96, 1.04, alpha=0.2, color='green', label='Optimal range')
     ax.set_xlabel('Tolerance Factor (t)')
     ax.set_ylabel(f'σ total at {temperature}°C (mS/cm)')
     ax.set_title(f'Effect of Tolerance Factor on Conductivity at {temperature}°C')
@@ -1556,10 +2173,14 @@ def plot_tolerance_factor_influence(df_long, ax, temperature=600):
 
 
 def plot_oxygen_vacancy_influence(df_long, ax, temperature=600):
-    """График 15: Влияние концентрации кислородных вакансий на проводимость"""
+    """Plot 15: Influence of oxygen vacancy concentration on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['oxygen_vacancy_conc', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if len(plot_df) == 0:
         ax.text(0.5, 0.5, f'No oxygen vacancy data at {temperature}°C', ha='center', va='center')
@@ -1591,9 +2212,13 @@ def plot_oxygen_vacancy_influence(df_long, ax, temperature=600):
 
 
 def plot_correlation_matrix_conductivity(df_long, features, temperature=600):
-    """График 16: Корреляционная матрица для параметров проводимости"""
+    """Plot 16: Correlation matrix for conductivity parameters"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     available_features = [f for f in features if f in plot_df.columns]
     available_features.append('sigma_total_mS')
@@ -1616,12 +2241,314 @@ def plot_correlation_matrix_conductivity(df_long, features, temperature=600):
     return fig
 
 
+# ============================================================================
+# NEW PLOTTING FUNCTIONS FOR ENHANCED ANALYSIS
+# ============================================================================
+
+def plot_shap_summary(shap_result, ax):
+    """
+    Plot SHAP summary plot.
+    
+    Parameters
+    ----------
+    shap_result : dict
+        Result from shap_analysis function
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    """
+    if shap_result is None:
+        ax.text(0.5, 0.5, 'Insufficient data for SHAP analysis', ha='center', va='center')
+        return ax
+    
+    shap_values = shap_result['shap_values']
+    X = shap_result['X']
+    feature_names = shap_result['feature_names']
+    
+    # Create SHAP summary plot
+    shap.summary_plot(shap_values, X, feature_names=feature_names, show=False)
+    
+    # Get current figure and transfer to ax
+    fig = plt.gcf()
+    # This is a bit tricky - for simplicity, we'll use a different approach
+    # Clear ax and use shap's plotting
+    ax.clear()
+    
+    # Alternative: manually create a bar plot of mean absolute SHAP values
+    mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
+    sorted_idx = np.argsort(mean_abs_shap)[::-1]
+    
+    ax.barh(range(len(sorted_idx)), mean_abs_shap[sorted_idx])
+    ax.set_yticks(range(len(sorted_idx)))
+    ax.set_yticklabels([feature_names[i] for i in sorted_idx])
+    ax.set_xlabel('Mean |SHAP value|')
+    ax.set_title('Feature Importance (SHAP)')
+    ax.invert_yaxis()
+    
+    return ax
+
+
+def plot_polynomial_fit(df_long, x_col, y_col, ax, degree=2, temperature=600):
+    """
+    Plot polynomial fit for non-linear relationships.
+    
+    Parameters
+    ----------
+    df_long : pandas.DataFrame
+        Long format data
+    x_col : str
+        Independent variable column
+    y_col : str
+        Dependent variable column (usually 'sigma_total_mS')
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    degree : int
+        Polynomial degree
+    temperature : int
+        Temperature in Celsius
+    """
+    plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    plot_df = plot_df.dropna(subset=[x_col, y_col])
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
+    
+    if len(plot_df) < 5:
+        ax.text(0.5, 0.5, f'Insufficient data for {x_col}', ha='center', va='center')
+        return ax
+    
+    # Plot original data points by additive type
+    for additive in plot_df['additive_type'].unique():
+        additive_data = plot_df[plot_df['additive_type'] == additive]
+        color = SINTERING_ADDITIVE_COLORS.get(additive, SINTERING_ADDITIVE_COLORS['default'])
+        marker = SINTERING_ADDITIVE_MARKERS.get(additive, SINTERING_ADDITIVE_MARKERS['default'])
+        
+        ax.scatter(
+            additive_data[x_col],
+            additive_data[y_col],
+            color=color,
+            marker=marker,
+            s=60,
+            alpha=0.6,
+            edgecolors='black',
+            linewidth=0.5,
+            label=additive
+        )
+    
+    # Perform polynomial regression on all data
+    poly_result = polynomial_regression_analysis(plot_df, x_col, y_col, degree)
+    
+    if poly_result['model'] is not None:
+        ax.plot(poly_result['x_pred'], poly_result['y_pred'], 
+               'k-', linewidth=2, alpha=0.7, 
+               label=f'Polynomial fit (R² = {poly_result["r2"]:.3f})')
+    
+    ax.set_xlabel(x_col.replace('_', ' ').title())
+    ax.set_ylabel(f'σ total at {temperature}°C (mS/cm)')
+    ax.set_title(f'{x_col.replace("_", " ").title()} vs Conductivity')
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.grid(True, alpha=0.3)
+    
+    return ax
+
+
+def plot_partial_correlations(df_long, features, target, control_vars, ax, temperature=600):
+    """
+    Plot partial correlations bar chart.
+    
+    Parameters
+    ----------
+    df_long : pandas.DataFrame
+        Long format data
+    features : list
+        Feature columns
+    target : str
+        Target column
+    control_vars : list
+        Control variables
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    temperature : int
+        Temperature in Celsius
+    """
+    plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
+    
+    # Calculate partial correlations
+    partial_df = partial_correlation_analysis(plot_df, target, features, control_vars)
+    
+    if len(partial_df) == 0:
+        ax.text(0.5, 0.5, 'Insufficient data for partial correlation', ha='center', va='center')
+        return ax
+    
+    partial_df = partial_df.sort_values('partial_correlation', ascending=False)
+    
+    colors = ['#4DAF4A' if corr > 0 else '#E41A1C' for corr in partial_df['partial_correlation']]
+    
+    bars = ax.barh(range(len(partial_df)), partial_df['partial_correlation'], color=colors, edgecolor='black')
+    
+    ax.set_yticks(range(len(partial_df)))
+    ax.set_yticklabels(partial_df['feature'])
+    ax.set_xlabel(f'Partial Correlation with {target}')
+    ax.set_title(f'Partial Correlations (controlling for {", ".join(control_vars[:2])})')
+    ax.axvline(x=0, color='black', linestyle='-', linewidth=1)
+    ax.grid(True, alpha=0.3, axis='x')
+    
+    # Add p-value annotations
+    for i, (_, row) in enumerate(partial_df.iterrows()):
+        if row['p_value'] < 0.05:
+            ax.text(row['partial_correlation'] + 0.02, i, '*', fontsize=12, va='center')
+    
+    ax.invert_yaxis()
+    return ax
+
+
+def plot_clustering_results(df_long, feature_columns, ax, eps=0.5, min_samples=3):
+    """
+    Plot clustering results using PCA for visualization.
+    
+    Parameters
+    ----------
+    df_long : pandas.DataFrame
+        Long format data
+    feature_columns : list
+        Features to use for clustering
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    eps : float
+        DBSCAN epsilon
+    min_samples : int
+        DBSCAN min_samples
+    """
+    # Aggregate by sample
+    agg_df = df_long.groupby('sample_id')[feature_columns].mean().dropna()
+    
+    if len(agg_df) < 3:
+        ax.text(0.5, 0.5, 'Insufficient data for clustering', ha='center', va='center')
+        return ax
+    
+    # Standardize
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(agg_df)
+    
+    # DBSCAN clustering
+    clustering = DBSCAN(eps=eps, min_samples=min_samples)
+    clusters = clustering.fit_predict(X_scaled)
+    
+    # PCA for visualization
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_scaled)
+    
+    # Get additive types for coloring
+    additive_map = df_long.groupby('sample_id')['additive_type'].first()
+    additive_colors = [SINTERING_ADDITIVE_COLORS.get(additive_map.get(idx, 'Pure'), SINTERING_ADDITIVE_COLORS['default']) 
+                      for idx in agg_df.index]
+    
+    scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1], c=clusters, cmap='viridis', s=100, alpha=0.7, edgecolors='black')
+    
+    # Add labels for each point
+    for i, idx in enumerate(agg_df.index):
+        additive = additive_map.get(idx, '')
+        ax.annotate(f'{additive}', (X_pca[i, 0], X_pca[i, 1]), fontsize=8, alpha=0.7)
+    
+    ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
+    ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
+    ax.set_title(f'DBSCAN Clustering (eps={eps}, min_samples={min_samples})')
+    
+    # Add colorbar for clusters
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Cluster')
+    
+    return ax
+
+
+def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', ax=None):
+    """
+    Plot correlation between feature and target as function of temperature.
+    
+    Parameters
+    ----------
+    df_long : pandas.DataFrame
+        Long format data
+    feature : str
+        Feature column name
+    target : str
+        Target column name (default: 'sigma_total_mS')
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    """
+    temperatures = sorted(df_long['temperature_C'].unique())
+    
+    correlations = []
+    p_values = []
+    
+    for T in temperatures:
+        temp_df = df_long[df_long['temperature_C'] == T].dropna(subset=[feature, target])
+        
+        # Exclude outliers
+        if 'is_outlier' in temp_df.columns:
+            temp_df = temp_df[~temp_df['is_outlier']]
+        
+        if len(temp_df) > 3:
+            corr, p_val = spearmanr(temp_df[feature], temp_df[target])
+            correlations.append(corr)
+            p_values.append(p_val)
+        else:
+            correlations.append(np.nan)
+            p_values.append(np.nan)
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot correlation
+    ax.plot(temperatures, correlations, 'o-', color='#377EB8', linewidth=2, markersize=6)
+    
+    # Add significance indicators
+    for i, (T, p_val) in enumerate(zip(temperatures, p_values)):
+        if p_val < 0.05:
+            ax.scatter(T, correlations[i], s=150, facecolors='none', edgecolors='red', linewidth=2, zorder=5)
+    
+    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+    ax.fill_between(temperatures, -0.2, 0.2, alpha=0.1, color='gray')
+    ax.set_xlabel('Temperature (°C)')
+    ax.set_ylabel(f'Spearman Correlation: {feature} vs {target}')
+    ax.set_title(f'Temperature-Dependent Correlation: {feature}')
+    ax.grid(True, alpha=0.3)
+    
+    # Add annotation for significant points
+    if any(p < 0.05 for p in p_values if not np.isnan(p)):
+        ax.annotate('* p < 0.05', xy=(0.02, 0.98), xycoords='axes fraction', fontsize=8)
+    
+    return ax
+
+
+# ============================================================================
+# INSIGHTS GENERATION (ENHANCED)
+# ============================================================================
+
 def generate_conductivity_insights(df_long):
-    """Автоматическая генерация инсайтов по проводимости"""
+    """
+    Automatic generation of physical insights for conductivity.
+    
+    Enhanced version with additional insights:
+    - Tolerance factor optimal range analysis
+    - Grain size effect quantification
+    - Density threshold analysis
+    - Additive-specific recommendations
+    - Temperature-dependent insights
+    """
     insights = []
     
-    # Сравнение Pure vs добавки при 600°C
+    # Comparison of Pure vs additives at 600°C
     df_600 = df_long[df_long['temperature_C'] == 600].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in df_600.columns:
+        df_600 = df_600[~df_600['is_outlier']]
+    
     if len(df_600) > 0:
         pure_mean = df_600[df_600['additive_type'] == 'Pure']['sigma_total_mS'].mean()
         if not pd.isna(pure_mean):
@@ -1634,21 +2561,33 @@ def generate_conductivity_insights(df_long):
                             insights.append(f"**{additive} additive** shows {improvement:.0f}% higher conductivity than Pure at 600°C.")
                         elif improvement < -50:
                             insights.append(f"**{additive} additive** shows {abs(improvement):.0f}% lower conductivity than Pure at 600°C.")
+                        elif improvement > 10:
+                            insights.append(f"**{additive} additive** shows moderate improvement ({improvement:.0f}%) at 600°C.")
     
-    # Оптимальная концентрация добавки
+    # Optimal additive concentration
     for additive in df_long['additive_type'].unique():
         if additive != 'Pure':
             additive_data = df_long[df_long['additive_type'] == additive].copy()
             additive_data = additive_data.dropna(subset=['additive_concentration_wt', 'sigma_total_mS'])
+            
+            # Exclude outliers
+            if 'is_outlier' in additive_data.columns:
+                additive_data = additive_data[~additive_data['is_outlier']]
+            
             if len(additive_data) > 3:
-                # Группировка по концентрации
+                # Group by concentration
                 grouped = additive_data.groupby('additive_concentration_wt')['sigma_total_mS'].mean().reset_index()
                 if len(grouped) > 1:
                     max_conc = grouped.loc[grouped['sigma_total_mS'].idxmax(), 'additive_concentration_wt']
                     insights.append(f"Optimal concentration for **{additive} additive** appears around {max_conc:.2f} wt%.")
     
-    # Влияние размера зерен
+    # Grain size effect
     df_grain = df_long.dropna(subset=['grain_size_um', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in df_grain.columns:
+        df_grain = df_grain[~df_grain['is_outlier']]
+    
     if len(df_grain) > 10:
         corr, p_val = stats.spearmanr(df_grain['grain_size_um'], df_grain['sigma_total_mS'])
         if p_val < 0.05:
@@ -1656,16 +2595,35 @@ def generate_conductivity_insights(df_long):
                 insights.append(f"**Strong positive correlation** between grain size and conductivity (ρ = {corr:.2f}, p < 0.05). Larger grains improve conductivity.")
             elif corr < -0.5:
                 insights.append(f"**Strong negative correlation** between grain size and conductivity (ρ = {corr:.2f}, p < 0.05). Smaller grains improve conductivity.")
+            elif corr > 0.2:
+                insights.append(f"**Weak positive correlation** between grain size and conductivity (ρ = {corr:.2f}).")
     
-    # Влияние плотности
+    # Density effect
     df_density = df_long.dropna(subset=['density_percent', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in df_density.columns:
+        df_density = df_density[~df_density['is_outlier']]
+    
     if len(df_density) > 10:
         corr, p_val = stats.spearmanr(df_density['density_percent'], df_density['sigma_total_mS'])
         if p_val < 0.05 and corr > 0.3:
             insights.append(f"**Positive correlation** between density and conductivity (ρ = {corr:.2f}, p < 0.05). Higher density improves conductivity.")
+        
+        # Density threshold analysis
+        high_density = df_density[df_density['density_percent'] >= 95]['sigma_total_mS'].mean()
+        low_density = df_density[df_density['density_percent'] < 95]['sigma_total_mS'].mean()
+        if not pd.isna(high_density) and not pd.isna(low_density) and high_density > low_density:
+            ratio = high_density / low_density if low_density > 0 else float('inf')
+            insights.append(f"Samples with density >95% have **{ratio:.1f}x higher** conductivity than less dense samples.")
     
-    # Влияние tolerance factor
+    # Tolerance factor analysis
     df_t = df_long.dropna(subset=['tolerance_factor', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in df_t.columns:
+        df_t = df_t[~df_t['is_outlier']]
+    
     if len(df_t) > 10:
         t_opt = df_t[(df_t['tolerance_factor'] >= 0.96) & (df_t['tolerance_factor'] <= 1.04)]
         t_out = df_t[(df_t['tolerance_factor'] < 0.96) | (df_t['tolerance_factor'] > 1.04)]
@@ -1675,15 +2633,82 @@ def generate_conductivity_insights(df_long):
             if mean_opt > mean_out:
                 ratio = mean_opt / mean_out if mean_out > 0 else float('inf')
                 insights.append(f"Systems with tolerance factor in [0.96-1.04] have **{ratio:.1f}x higher** average conductivity.")
+        
+        # Distortion effect
+        df_t['distortion'] = abs(df_t['tolerance_factor'] - 1.0)
+        corr, p_val = stats.spearmanr(df_t['distortion'], df_t['sigma_total_mS'])
+        if p_val < 0.05 and corr < -0.3:
+            insights.append(f"**Negative correlation** between lattice distortion and conductivity (ρ = {corr:.2f}). More cubic structures perform better.")
     
-    # Вклад зернограничной проводимости
+    # Oxygen vacancy concentration (non-linear analysis)
+    df_vac = df_long.dropna(subset=['oxygen_vacancy_conc', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in df_vac.columns:
+        df_vac = df_vac[~df_vac['is_outlier']]
+    
+    if len(df_vac) > 15:
+        # Check for optimal range (0.05-0.15)
+        optimal = df_vac[(df_vac['oxygen_vacancy_conc'] >= 0.05) & (df_vac['oxygen_vacancy_conc'] <= 0.15)]
+        low = df_vac[df_vac['oxygen_vacancy_conc'] < 0.05]
+        high = df_vac[df_vac['oxygen_vacancy_conc'] > 0.15]
+        
+        if len(optimal) > 0 and len(low) > 0:
+            opt_mean = optimal['sigma_total_mS'].mean()
+            low_mean = low['sigma_total_mS'].mean()
+            if opt_mean > low_mean:
+                insights.append(f"Optimal oxygen vacancy concentration appears in **0.05-0.15 range** (vs low vacancy samples).")
+        
+        if len(optimal) > 0 and len(high) > 0:
+            opt_mean = optimal['sigma_total_mS'].mean()
+            high_mean = high['sigma_total_mS'].mean()
+            if opt_mean > high_mean:
+                insights.append(f"**Excessive oxygen vacancies (>0.15)** may reduce conductivity due to trapping effects.")
+    
+    # Grain boundary contribution
     df_gb = df_long.dropna(subset=['gb_resistance_fraction'])
+    
+    # Exclude outliers
+    if 'is_outlier' in df_gb.columns:
+        df_gb = df_gb[~df_gb['is_outlier']]
+    
     if len(df_gb) > 5:
         mean_gb = df_gb['gb_resistance_fraction'].mean()
         if mean_gb > 0.5:
             insights.append(f"**Grain boundaries dominate** the total resistance ({mean_gb:.1%} on average). Improving grain boundary conductivity is critical.")
         else:
             insights.append(f"**Bulk conductivity dominates** the total resistance ({1-mean_gb:.1%} on average).")
+        
+        # Temperature-dependent GB analysis
+        gb_by_temp = df_gb.groupby('temperature_C')['gb_resistance_fraction'].mean()
+        if len(gb_by_temp) > 3:
+            temp_range = gb_by_temp.index.max() - gb_by_temp.index.min()
+            if temp_range > 300:
+                low_temp = gb_by_temp[gb_by_temp.index < 400].mean() if any(gb_by_temp.index < 400) else None
+                high_temp = gb_by_temp[gb_by_temp.index > 700].mean() if any(gb_by_temp.index > 700) else None
+                if low_temp is not None and high_temp is not None:
+                    if low_temp > high_temp:
+                        insights.append(f"Grain boundary contribution **decreases with temperature** (from {low_temp:.2f} at <400°C to {high_temp:.2f} at >700°C).")
+    
+    # Additive incorporation analysis
+    if 'additive_incorporation_likely' in df_long.columns:
+        incorp_true = df_long[df_long['additive_incorporation_likely'] == True]['sigma_total_mS'].mean()
+        incorp_false = df_long[df_long['additive_incorporation_likely'] == False]['sigma_total_mS'].mean()
+        if not pd.isna(incorp_true) and not pd.isna(incorp_false):
+            if incorp_true > incorp_false:
+                insights.append(f"Additives that **incorporate into the lattice** (Zn, Co) show higher average conductivity than segregating additives (Cu, Ni).")
+    
+    # Radius mismatch effect
+    df_mismatch = df_long.dropna(subset=['radius_mismatch', 'sigma_total_mS'])
+    
+    # Exclude outliers
+    if 'is_outlier' in df_mismatch.columns:
+        df_mismatch = df_mismatch[~df_mismatch['is_outlier']]
+    
+    if len(df_mismatch) > 10:
+        corr, p_val = stats.spearmanr(df_mismatch['radius_mismatch'], df_mismatch['sigma_total_mS'])
+        if p_val < 0.05 and corr < -0.3:
+            insights.append(f"**Larger B-site radius mismatch** correlates with lower conductivity (ρ = {corr:.2f}). Compositional homogeneity is important.")
     
     if len(insights) == 0:
         insights.append("Insufficient data for automated insights. Add more data points to enable pattern detection.")
@@ -1692,17 +2717,39 @@ def generate_conductivity_insights(df_long):
 
 
 # ============================================================================
-# ФУНКЦИИ ДЛЯ ML АНАЛИЗА ПРОВОДИМОСТИ
+# ML FUNCTIONS FOR CONDUCTIVITY ANALYSIS (ENHANCED with SHAP)
 # ============================================================================
+
 @st.cache_data
 def feature_importance_conductivity(df_long, selected_features=None, target='sigma_total_mS', temperature=600):
-    """Random Forest анализ важности признаков для проводимости"""
+    """
+    Random Forest feature importance analysis for conductivity.
     
+    Parameters
+    ----------
+    df_long : pandas.DataFrame
+        Long format data
+    selected_features : list
+        Features to include
+    target : str
+        Target column
+    temperature : int
+        Temperature in Celsius
+    
+    Returns
+    -------
+    tuple
+        (importance_df, r2) or (None, None) if insufficient data
+    """
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if selected_features is None:
         selected_features = ['density_percent', 'grain_size_um', 'tolerance_factor', 
-                            'oxygen_vacancy_conc', 'additive_concentration_wt']
+                            'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch']
     
     available_features = [f for f in selected_features if f in plot_df.columns]
     
@@ -1716,7 +2763,7 @@ def feature_importance_conductivity(df_long, selected_features=None, target='sig
     
     X = plot_df[available_features].copy()
     
-    # Добавляем one-hot кодирование для типа добавки
+    # Add one-hot encoding for additive type
     if 'additive_type' in plot_df.columns:
         X = pd.concat([X, pd.get_dummies(plot_df['additive_type'], prefix='additive')], axis=1)
     
@@ -1737,23 +2784,44 @@ def feature_importance_conductivity(df_long, selected_features=None, target='sig
 
 @st.cache_data
 def compare_ml_models_conductivity(df_long, selected_features=None, target='sigma_total_mS', temperature=600):
-    """Сравнение нескольких моделей ML для проводимости"""
+    """
+    Compare multiple ML models for conductivity prediction.
     
+    Parameters
+    ----------
+    df_long : pandas.DataFrame
+        Long format data
+    selected_features : list
+        Features to include
+    target : str
+        Target column
+    temperature : int
+        Temperature in Celsius
+    
+    Returns
+    -------
+    tuple
+        (results_df, models, X, y) or (None, None, None, None) if insufficient data
+    """
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
+    
+    # Exclude outliers
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
     
     if selected_features is None:
         selected_features = ['density_percent', 'grain_size_um', 'tolerance_factor', 
-                            'oxygen_vacancy_conc', 'additive_concentration_wt']
+                            'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch']
     
     available_features = [f for f in selected_features if f in plot_df.columns]
     
     if len(available_features) < 2:
-        return None, None, None
+        return None, None, None, None
     
     plot_df = plot_df.dropna(subset=[target] + available_features)
     
     if len(plot_df) < 10:
-        return None, None, None
+        return None, None, None, None
     
     X = plot_df[available_features].copy()
     
@@ -1762,7 +2830,7 @@ def compare_ml_models_conductivity(df_long, selected_features=None, target='sigm
     
     y = plot_df[target]
     
-    # Определяем модели
+    # Define models
     models = {
         'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
         'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
@@ -1792,7 +2860,7 @@ def compare_ml_models_conductivity(df_long, selected_features=None, target='sigm
 
 
 # ============================================================================
-# ОСНОВНОЕ STREAMLIT-ПРИЛОЖЕНИЕ
+# MAIN STREAMLIT APPLICATION
 # ============================================================================
 def main():
     st.set_page_config(
@@ -1805,11 +2873,11 @@ def main():
     st.markdown("Analyzing the effect of sintering additives (Cu, Ni, Zn, Co) on total, bulk, and grain boundary conductivity")
     st.markdown("---")
     
-    # Боковая панель
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Controls")
         
-        # Загрузка файла
+        # File upload
         uploaded_file = st.file_uploader(
             "Upload Excel file", 
             type=['xlsx', 'xls'],
@@ -1844,7 +2912,7 @@ def main():
         st.markdown("---")
         st.header("📊 Analysis Settings")
         
-        # Выбор температуры для анализа
+        # Temperature selection for analysis
         temperature_analysis = st.slider(
             "Reference Temperature for Analysis (°C)",
             min_value=200,
@@ -1858,11 +2926,22 @@ def main():
         st.header("🔍 Filters")
         
         try:
+            # Show progress bar for file loading and processing
+            progress_bar = st.progress(0, text="Loading file...")
+            
             df = pd.read_excel(uploaded_file, engine='openpyxl')
             
-            with st.spinner("Processing conductivity data..."):
-                df_long, df_wide = process_conductivity_data(df)
-                
+            progress_bar.progress(0.3, text="Processing conductivity data...")
+            
+            df_long, df_wide = process_conductivity_data(df, progress_bar)
+            
+            progress_bar.progress(0.9, text="Finalizing...")
+            
+            # Clear progress bar after completion
+            time.sleep(0.5)
+            progress_bar.empty()
+            
+            with st.sidebar:
                 if 'additive_type' in df_long.columns:
                     selected_additives = st.multiselect(
                         "Sintering Additives",
@@ -1899,7 +2978,7 @@ def main():
                 else:
                     selected_atmosphere = []
                 
-                # Применяем фильтры
+                # Apply filters
                 filtered_long = df_long.copy()
                 
                 if selected_additives:
@@ -1922,9 +3001,13 @@ def main():
             return
     
     if uploaded_file is not None and len(filtered_long) > 0:
-        # Отображение информации о данных
+        # Display data information
         st.subheader("📈 Data Overview")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        # Calculate outlier count
+        outlier_count = filtered_long['is_outlier'].sum() if 'is_outlier' in filtered_long.columns else 0
+        
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         
         with col1:
             st.metric("Total measurements", len(filtered_long))
@@ -1936,22 +3019,28 @@ def main():
             st.metric("B-site cations", filtered_long['B1_cation'].nunique())
         with col5:
             st.metric("Temp range", f"{filtered_long['temperature_C'].min()}-{filtered_long['temperature_C'].max()}°C")
+        with col6:
+            st.metric("Outliers detected", outlier_count)
+        
+        if outlier_count > 0:
+            st.warning(f"⚠️ {outlier_count} outlier measurements detected and will be excluded from analysis.")
         
         st.markdown("---")
         
-        # Вкладки
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        # Tabs
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
             "📊 Conductivity Overview",
             "🔬 Additive Analysis",
             "⚡ Bulk vs GB Analysis",
             "📈 Microstructure Effects",
             "🧪 Compositional Effects",
             "🤖 ML & Feature Importance",
+            "📐 Advanced Analysis",
             "💡 Insights & Data"
         ])
         
         # ============================================================================
-        # ВКЛАДКА 1: CONDUCTIVITY OVERVIEW
+        # TAB 1: CONDUCTIVITY OVERVIEW
         # ============================================================================
         with tab1:
             st.subheader("Conductivity vs Temperature")
@@ -1986,7 +3075,7 @@ def main():
                 st.pyplot(fig)
                 plt.close(fig)
             
-            # Тепловая карта
+            # Heatmap
             if len(filtered_wide) > 0:
                 fig, ax = plt.subplots(figsize=(10, 6))
                 plot_conductivity_heatmap(filtered_wide, ax, temperature_analysis)
@@ -1994,7 +3083,7 @@ def main():
                 plt.close(fig)
         
         # ============================================================================
-        # ВКЛАДКА 2: ADDITIVE ANALYSIS
+        # TAB 2: ADDITIVE ANALYSIS
         # ============================================================================
         with tab2:
             st.subheader("Effect of Additive Concentration")
@@ -2021,7 +3110,7 @@ def main():
             plt.close(fig)
         
         # ============================================================================
-        # ВКЛАДКА 3: BULK VS GB ANALYSIS
+        # TAB 3: BULK VS GB ANALYSIS
         # ============================================================================
         with tab3:
             st.subheader("Bulk vs Grain Boundary Conductivity")
@@ -2040,11 +3129,15 @@ def main():
                 st.pyplot(fig)
                 plt.close(fig)
             
-            # Проверка формулы 1/σ_total = 1/σ_bulk + 1/σ_gb
+            # Verification of mixing rule
             st.subheader("Verification of the Mixing Rule")
             
             df_check = filtered_long.dropna(subset=['sigma_total_mS', 'sigma_bulk_mS', 'sigma_gb_mS'])
             df_check = df_check[df_check['temperature_C'] == temperature_analysis]
+            
+            # Exclude outliers
+            if 'is_outlier' in df_check.columns:
+                df_check = df_check[~df_check['is_outlier']]
             
             if len(df_check) > 0:
                 df_check['sigma_total_calc'] = 1.0 / (1.0/df_check['sigma_bulk_mS'] + 1.0/df_check['sigma_gb_mS'])
@@ -2072,7 +3165,7 @@ def main():
                 st.info(f"No data with both bulk and GB conductivity at {temperature_analysis}°C")
         
         # ============================================================================
-        # ВКЛАДКА 4: MICROSTRUCTURE EFFECTS
+        # TAB 4: MICROSTRUCTURE EFFECTS
         # ============================================================================
         with tab4:
             st.subheader("Microstructure Effects on Conductivity")
@@ -2097,7 +3190,7 @@ def main():
             plt.close(fig)
         
         # ============================================================================
-        # ВКЛАДКА 5: COMPOSITIONAL EFFECTS
+        # TAB 5: COMPOSITIONAL EFFECTS
         # ============================================================================
         with tab5:
             st.subheader("Compositional Effects on Conductivity")
@@ -2116,16 +3209,24 @@ def main():
                 st.pyplot(fig)
                 plt.close(fig)
             
-            # Корреляционная матрица
+            # New: Radius mismatch effect
+            st.subheader("B-site Radius Mismatch Effect")
+            fig, ax = plt.subplots(figsize=(8, 6))
+            plot_polynomial_fit(filtered_long, 'radius_mismatch', 'sigma_total_mS', ax, degree=2, temperature=temperature_analysis)
+            st.pyplot(fig)
+            plt.close(fig)
+            
+            # Correlation matrix
             st.subheader("Correlation Matrix")
             features = ['density_percent', 'grain_size_um', 'tolerance_factor', 
-                       'oxygen_vacancy_conc', 'additive_concentration_wt']
+                       'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch',
+                       'lattice_distortion_index', 'electronegativity_difference_B_O']
             fig = plot_correlation_matrix_conductivity(filtered_long, features, temperature_analysis)
             st.pyplot(fig)
             plt.close(fig)
         
         # ============================================================================
-        # ВКЛАДКА 6: ML & FEATURE IMPORTANCE
+        # TAB 6: ML & FEATURE IMPORTANCE
         # ============================================================================
         with tab6:
             st.subheader("Machine Learning Analysis")
@@ -2133,7 +3234,8 @@ def main():
             ml_features = st.multiselect(
                 "Select features for ML analysis",
                 options=['density_percent', 'grain_size_um', 'tolerance_factor', 
-                        'oxygen_vacancy_conc', 'additive_concentration_wt'],
+                        'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch',
+                        'lattice_distortion_index'],
                 default=['density_percent', 'grain_size_um', 'tolerance_factor', 'additive_concentration_wt']
             )
             
@@ -2172,11 +3274,151 @@ def main():
                     st.dataframe(models_df, use_container_width=True)
                 else:
                     st.warning("Insufficient data for model comparison")
+            
+            # SHAP Analysis (NEW)
+            st.subheader("🔬 SHAP Analysis (Model Interpretability)")
+            
+            if len(ml_features) >= 2 and models_df is not None:
+                shap_result = shap_analysis(
+                    filtered_long[filtered_long['temperature_C'] == temperature_analysis],
+                    ml_features, 'sigma_total_mS', model_type='xgboost'
+                )
+                
+                if shap_result is not None:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**SHAP Feature Importance**")
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        plot_shap_summary(shap_result, ax)
+                        st.pyplot(fig)
+                        plt.close(fig)
+                    
+                    with col2:
+                        st.markdown("**SHAP Dependence Plot**")
+                        feature_for_dependence = st.selectbox(
+                            "Select feature for SHAP dependence plot",
+                            options=ml_features
+                        )
+                        
+                        if feature_for_dependence in shap_result['feature_names']:
+                            fig, ax = plt.subplots(figsize=(8, 6))
+                            idx = shap_result['feature_names'].index(feature_for_dependence)
+                            shap_values = shap_result['shap_values']
+                            X_data = shap_result['X']
+                            
+                            ax.scatter(X_data[:, idx], shap_values[:, idx], 
+                                      c='steelblue', alpha=0.6, edgecolors='black')
+                            ax.set_xlabel(feature_for_dependence)
+                            ax.set_ylabel('SHAP value')
+                            ax.set_title(f'SHAP Dependence: {feature_for_dependence}')
+                            ax.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+                            ax.grid(True, alpha=0.3)
+                            st.pyplot(fig)
+                            plt.close(fig)
+                else:
+                    st.info("Insufficient data for SHAP analysis (need at least 10 samples)")
+            else:
+                st.info("Select at least 2 features and ensure sufficient data for SHAP analysis")
         
         # ============================================================================
-        # ВКЛАДКА 7: INSIGHTS & DATA
+        # TAB 7: ADVANCED ANALYSIS (NEW)
         # ============================================================================
         with tab7:
+            st.subheader("Advanced Statistical Analysis")
+            
+            # Partial Correlation Analysis
+            st.markdown("### Partial Correlation Analysis")
+            st.markdown("*Controlling for density and grain size effects*")
+            
+            control_vars = st.multiselect(
+                "Select control variables",
+                options=['density_percent', 'grain_size_um', 'porosity'],
+                default=['density_percent', 'grain_size_um'] if 'density_percent' in filtered_long.columns and 'grain_size_um' in filtered_long.columns else []
+            )
+            
+            if len(control_vars) > 0:
+                features_for_partial = ['tolerance_factor', 'oxygen_vacancy_conc', 
+                                        'additive_concentration_wt', 'radius_mismatch']
+                available_partial = [f for f in features_for_partial if f in filtered_long.columns]
+                
+                if len(available_partial) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    plot_partial_correlations(filtered_long, available_partial, 'sigma_total_mS', 
+                                             control_vars, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
+                else:
+                    st.warning("No features available for partial correlation analysis")
+            else:
+                st.info("Select at least one control variable")
+            
+            # Temperature-dependent correlation
+            st.markdown("### Temperature-Dependent Correlations")
+            
+            temp_corr_feature = st.selectbox(
+                "Select feature to analyze temperature-dependent correlation",
+                options=['tolerance_factor', 'oxygen_vacancy_conc', 'radius_mismatch', 
+                        'grain_size_um', 'density_percent'] if len(['tolerance_factor', 'oxygen_vacancy_conc', 'radius_mismatch', 'grain_size_um', 'density_percent']) > 0 else [],
+                help="Shows how correlation between this feature and conductivity changes with temperature"
+            )
+            
+            if temp_corr_feature and temp_corr_feature in filtered_long.columns:
+                fig = plot_correlation_by_temperature(filtered_long, temp_corr_feature, 'sigma_total_mS')
+                st.pyplot(fig)
+                plt.close(fig)
+            
+            # Polynomial regression for non-linear relationships
+            st.markdown("### Non-linear Relationship Analysis")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                poly_feature = st.selectbox(
+                    "Select X variable",
+                    options=['oxygen_vacancy_conc', 'additive_concentration_wt', 'grain_size_um', 'radius_mismatch'],
+                    key='poly_x'
+                )
+            
+            with col2:
+                poly_degree = st.slider("Polynomial degree", min_value=2, max_value=4, value=2)
+            
+            if poly_feature in filtered_long.columns:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                plot_polynomial_fit(filtered_long, poly_feature, 'sigma_total_mS', ax, degree=poly_degree, temperature=temperature_analysis)
+                st.pyplot(fig)
+                plt.close(fig)
+            
+            # Clustering analysis
+            st.markdown("### Material Clustering Analysis")
+            
+            cluster_features = st.multiselect(
+                "Select features for clustering",
+                options=['tolerance_factor', 'oxygen_vacancy_conc', 'density_percent', 
+                        'grain_size_um', 'additive_concentration_wt'],
+                default=['tolerance_factor', 'oxygen_vacancy_conc'] if 'tolerance_factor' in filtered_long.columns and 'oxygen_vacancy_conc' in filtered_long.columns else []
+            )
+            
+            if len(cluster_features) >= 2:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    eps = st.slider("DBSCAN eps (neighborhood radius)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+                
+                with col2:
+                    min_samples = st.slider("DBSCAN min_samples", min_value=2, max_value=10, value=3)
+                
+                fig, ax = plt.subplots(figsize=(10, 8))
+                plot_clustering_results(filtered_long, cluster_features, ax, eps=eps, min_samples=min_samples)
+                st.pyplot(fig)
+                plt.close(fig)
+            else:
+                st.info("Select at least 2 features for clustering analysis")
+        
+        # ============================================================================
+        # TAB 8: INSIGHTS & DATA
+        # ============================================================================
+        with tab8:
             st.subheader("💡 Automated Physical Insights")
             
             insights = generate_conductivity_insights(filtered_long)
@@ -2186,16 +3428,17 @@ def main():
             st.markdown("---")
             st.subheader("📋 Processed Data")
             
-            # Показываем данные в длинном формате
+            # Show data in long format
             display_cols = ['sample_id', 'B1_cation', 'dopant', 'additive_type', 
-                           'additive_concentration_wt', 'temperature_C', 'sigma_total_mS',
-                           'sigma_bulk_mS', 'sigma_gb_mS', 'density_percent', 'grain_size_um',
-                           'tolerance_factor', 'Ea_calculated']
+                           'additive_concentration_wt', 'additive_incorporation_likely',
+                           'temperature_C', 'sigma_total_mS', 'sigma_bulk_mS', 'sigma_gb_mS',
+                           'density_percent', 'grain_size_um', 'tolerance_factor', 
+                           'radius_mismatch', 'oxygen_vacancy_conc', 'Ea_calculated', 'is_outlier']
             available_cols = [col for col in display_cols if col in filtered_long.columns]
             
             st.dataframe(filtered_long[available_cols].head(100), use_container_width=True)
             
-            # Экспорт данных
+            # Export data
             csv = filtered_long.to_csv(index=False).encode('utf-8')
             st.download_button(
                 "Download processed data as CSV",
@@ -2250,15 +3493,106 @@ def main():
         - Sintering temperature influence
         
         #### 🧪 **Compositional Effects**
-        - Tolerance factor analysis
+        - Tolerance factor analysis with optimal range [0.96-1.04]
         - Oxygen vacancy concentration effects
         - Additive concentration optimization
+        - B-site radius mismatch analysis
+        
+        #### 📐 **Advanced Statistical Analysis** (NEW)
+        - Partial correlation analysis (controlling for microstructure)
+        - Temperature-dependent correlations
+        - Polynomial regression for non-linear relationships
+        - DBSCAN clustering of materials
+        - SHAP analysis for model interpretability
         
         #### 🤖 **Machine Learning**
         - Feature importance (Random Forest)
         - Model comparison (RF, GB, XGBoost)
         - Cross-validation evaluation
+        - SHAP values for interpretation
         """)
 
+
+# ============================================================================
+# UNIT TESTS (for development and debugging)
+# ============================================================================
+
 if __name__ == "__main__":
+    # Unit tests for key functions
+    import sys
+    
+    def test_safe_float_converter():
+        """Test safe_float_converter function"""
+        assert safe_float_converter(123) == 123.0
+        assert safe_float_converter("123") == 123.0
+        assert safe_float_converter("123.45") == 123.45
+        assert safe_float_converter("123,45") == 123.45
+        assert safe_float_converter("123%") == 123.0
+        assert safe_float_converter("") is None
+        assert safe_float_converter(None) is None
+        assert safe_float_converter("abc") is None
+        print("✓ test_safe_float_converter passed")
+    
+    def test_flexible_column_mapper():
+        """Test FlexibleColumnMapper"""
+        mapper = FlexibleColumnMapper()
+        
+        # Test pattern matching
+        assert any(re.search(pattern, "σ total, mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
+        assert any(re.search(pattern, "sigma_total_mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
+        assert any(re.search(pattern, "σ bulk", re.IGNORECASE) for pattern in mapper.patterns['sigma_bulk'])
+        assert any(re.search(pattern, "σ gb", re.IGNORECASE) for pattern in mapper.patterns['sigma_gb'])
+        
+        print("✓ test_flexible_column_mapper passed")
+    
+    def test_polynomial_regression():
+        """Test polynomial_regression_analysis"""
+        # Create synthetic data
+        np.random.seed(42)
+        x = np.linspace(0, 1, 20)
+        y = x**2 + 0.1 * np.random.randn(20)
+        df = pd.DataFrame({'x': x, 'y': y})
+        
+        result = polynomial_regression_analysis(df, 'x', 'y', degree=2)
+        
+        assert result['model'] is not None
+        assert result['r2'] is not None
+        assert result['r2'] > 0.8  # Should fit well
+        assert len(result['x_pred']) == 100
+        assert len(result['y_pred']) == 100
+        
+        print("✓ test_polynomial_regression passed")
+    
+    def test_partial_correlation():
+        """Test partial_correlation_analysis"""
+        np.random.seed(42)
+        n = 50
+        data = {
+            'target': np.random.randn(n),
+            'feature1': np.random.randn(n),
+            'feature2': np.random.randn(n),
+            'control': np.random.randn(n)
+        }
+        df = pd.DataFrame(data)
+        
+        result = partial_correlation_analysis(df, 'target', ['feature1', 'feature2'], ['control'])
+        
+        assert len(result) == 2
+        assert 'partial_correlation' in result.columns
+        assert 'p_value' in result.columns
+        
+        print("✓ test_partial_correlation passed")
+    
+    # Run tests
+    print("\n=== Running Unit Tests ===\n")
+    try:
+        test_safe_float_converter()
+        test_flexible_column_mapper()
+        test_polynomial_regression()
+        test_partial_correlation()
+        print("\n✅ All tests passed!")
+    except Exception as e:
+        print(f"\n❌ Test failed: {e}")
+    
+    # Run main application
     main()
