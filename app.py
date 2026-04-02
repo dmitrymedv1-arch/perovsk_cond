@@ -1388,7 +1388,7 @@ def process_conductivity_data(df):
             T_C = sigma_data['temperature_C']
             
             record = {
-                'sample_id': int(idx) if not isinstance(idx, (int, np.integer)) else idx,
+                'sample_id': idx,
                 'A_cation': a_cation,
                 'B1_cation': b1_cation,
                 'B2_cation': b2_cation,
@@ -1479,6 +1479,13 @@ def process_conductivity_data(df):
     
     # Create wide format FROM long format (not recalculating)
     wide_format_data = []
+
+    if 'sample_id' not in long_df.columns:
+        # Создаем составной ID из ключевых параметров
+        long_df['sample_id'] = long_df.apply(
+            lambda row: f"{row.get('A_cation', '')}_{row.get('B1_cation', '')}_{row.get('dopant', '')}_{row.get('additive_type', '')}_{row.get('additive_concentration_wt', 0)}",
+            axis=1
+        )
     
     for sample_id in long_df['sample_id'].unique():
         sample_data = long_df[long_df['sample_id'] == sample_id]
