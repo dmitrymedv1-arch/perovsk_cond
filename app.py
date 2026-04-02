@@ -1286,13 +1286,12 @@ def shap_analysis(df, features, target, model_type='xgboost'):
 def process_conductivity_data(df):
     """
     Main function for processing conductivity data.
-    
-    NOTE: progress_bar cannot be cached. Use st.spinner() or st.progress() outside.
+    Enhanced version with proper handling of multi-row headers.
     
     Parameters
     ----------
     df : pandas.DataFrame
-        Source data
+        Source data (already loaded with proper column names)
     
     Returns
     -------
@@ -1317,17 +1316,43 @@ def process_conductivity_data(df):
     
     # Iterate through rows
     for idx, row in df_processed.iterrows():
+        # Skip empty rows
+        if pd.isna(row.get('A cation')) and pd.isna(row.get('B1 cation')):
+            continue
+            
         # Basic composition parameters
         a_cation = row.get('A cation', 'Ba')
+        if pd.isna(a_cation) or a_cation == '':
+            a_cation = 'Ba'
+            
         b1_cation = row.get('B1 cation', None)
+        if pd.isna(b1_cation) or b1_cation == '':
+            b1_cation = None
+            
         b2_cation = row.get('B2 cation', None)
+        if pd.isna(b2_cation) or b2_cation == '':
+            b2_cation = None
+            
         b2_cont = row.get('B2_cont', 0)
+        if pd.isna(b2_cont):
+            b2_cont = 0
+            
         dopant = row.get('dopant', None)
+        if pd.isna(dopant) or dopant == '':
+            dopant = None
+            
         dop_cont = row.get('dop_cont', 0)
+        if pd.isna(dop_cont):
+            dop_cont = 0
         
         # Sintering additive
         additive_type = row.get('Сд', 'Pure')
+        if pd.isna(additive_type) or additive_type == '':
+            additive_type = 'Pure'
+            
         additive_conc = row.get('x, wt%', 0.0)
+        if pd.isna(additive_conc):
+            additive_conc = 0.0
         
         # Synthesis parameters
         method = row.get('Method', None)
@@ -1370,10 +1395,89 @@ def process_conductivity_data(df):
             additive_type, additive_conc
         )
         
-        # Extract conductivity data
-        sigma_total_data = processor.extract_conductivity_data(row, 'sigma_total')
-        sigma_bulk_data = processor.extract_conductivity_data(row, 'sigma_bulk')
-        sigma_gb_data = processor.extract_conductivity_data(row, 'sigma_gb')
+        # Extract conductivity data - find all temperature columns
+        sigma_total_data = []
+        sigma_bulk_data = []
+        sigma_gb_data = []
+        
+        # Look for columns with temperatures
+        for col in df_processed.columns:
+            col_str = str(col).lower()
+            
+            # Check for temperature in column name (numbers like 200, 250, etc.)
+            temp_match = re.search(r'(\d{3})', col_str)
+            if temp_match:
+                temperature = int(temp_match.group(1))
+                
+                # Check if it's total conductivity
+                if 'total' in col_str or 'σ total' in col_str or ('sigma' in col_str and 'bulk' not in col_str and 'gb' not in col_str):
+                    sigma_value = row[col]
+                    if not pd.isna(sigma_value) and sigma_value != '' and sigma_value is not None:
+                        try:
+                            sigma_val = safe_float_converter(sigma_value)
+                            if sigma_val is not None and sigma_val > 0:
+                                sigma_total_data.append({
+                                    'temperature_K': temperature + 273.15,
+                                    'temperature_C': temperature,
+                                    'sigma_total_mS': sigma_val,
+                                    'sigma_total_S_cm': sigma_val / 1000.0
+                                })
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Check if it's bulk conductivity
+                elif 'bulk' in col_str or 'σ bulk' in col_str:
+                    sigma_value = row[col]
+                    if not pd.isna(sigma_value) and sigma_value != '' and sigma_value is not None:
+                        try:
+                            sigma_val = safe_float_converter(sigma_value)
+                            if sigma_val is not None and sigma_val > 0:
+                                sigma_bulk_data.append({
+                                    'temperature_K': temperature + 273.15,
+                                    'temperature_C': temperature,
+                                    'sigma_bulk_mS': sigma_val,
+                                    'sigma_bulk_S_cm': sigma_val / 1000.0
+                                })
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Check if it's grain boundary conductivity
+                elif 'gb' in col_str or 'σ gb' in col_str:
+                    sigma_value = row[col]
+                    if not pd.isna(sigma_value) and sigma_value != '' and sigma_value is not None:
+                        try:
+                            sigma_val = safe_float_converter(sigma_value)
+                            if sigma_val is not None and sigma_val > 0:
+                                sigma_gb_data.append({
+                                    'temperature_K': temperature + 273.15,
+                                    'temperature_C': temperature,
+                                    'sigma_gb_mS': sigma_val,
+                                    'sigma_gb_S_cm': sigma_val / 1000.0
+                                })
+                        except (ValueError, TypeError):
+                            pass
+        
+        # Also check for columns with exact temperature names (200, 250, etc.)
+        for temp in processor.temperatures:
+            # Total conductivity
+            col_name = str(temp)
+            if col_name in df_processed.columns:
+                sigma_value = row[col_name]
+                if not pd.isna(sigma_value) and sigma_value != '' and sigma_value is not None:
+                    try:
+                        sigma_val = safe_float_converter(sigma_value)
+                        if sigma_val is not None and sigma_val > 0:
+                            # Check if this is already added
+                            existing = [d for d in sigma_total_data if d['temperature_C'] == temp]
+                            if not existing:
+                                sigma_total_data.append({
+                                    'temperature_K': temp + 273.15,
+                                    'temperature_C': temp,
+                                    'sigma_total_mS': sigma_val,
+                                    'sigma_total_S_cm': sigma_val / 1000.0
+                                })
+                    except (ValueError, TypeError):
+                        pass
         
         # Calculate Arrhenius parameters
         arrhenius = processor.calculate_arrhenius_params(sigma_total_data)
@@ -1386,6 +1490,10 @@ def process_conductivity_data(df):
         # Add records to long format
         for sigma_data in sigma_total_data:
             T_C = sigma_data['temperature_C']
+            
+            # Find matching bulk and gb data for this temperature
+            bulk_at_T = next((b for b in sigma_bulk_data if b['temperature_C'] == T_C), None)
+            gb_at_T = next((g for g in sigma_gb_data if g['temperature_C'] == T_C), None)
             
             record = {
                 'sample_id': idx,
@@ -1428,7 +1536,6 @@ def process_conductivity_data(df):
             }
             
             # Add bulk conductivity if available
-            bulk_at_T = next((b for b in sigma_bulk_data if b['temperature_C'] == T_C), None)
             if bulk_at_T:
                 record['sigma_bulk_mS'] = bulk_at_T.get('sigma_bulk_mS')
                 record['sigma_bulk_S_cm'] = bulk_at_T.get('sigma_bulk_S_cm')
@@ -1437,7 +1544,6 @@ def process_conductivity_data(df):
                 record['sigma_bulk_S_cm'] = None
             
             # Add grain boundary conductivity if available
-            gb_at_T = next((g for g in sigma_gb_data if g['temperature_C'] == T_C), None)
             if gb_at_T:
                 record['sigma_gb_mS'] = gb_at_T.get('sigma_gb_mS')
                 record['sigma_gb_S_cm'] = gb_at_T.get('sigma_gb_S_cm')
@@ -1471,7 +1577,7 @@ def process_conductivity_data(df):
     long_df = pd.DataFrame(long_format_data)
     
     # Detect outliers in conductivity
-    if 'sigma_total_mS' in long_df.columns:
+    if 'sigma_total_mS' in long_df.columns and len(long_df) > 0:
         outlier_mask = ConductivityDataProcessor().detect_outliers_iqr(long_df, 'sigma_total_mS')
         long_df['is_outlier'] = outlier_mask
     else:
@@ -1480,68 +1586,70 @@ def process_conductivity_data(df):
     # Create wide format FROM long format (not recalculating)
     wide_format_data = []
 
-    if 'sample_id' not in long_df.columns:
-        # Создаем составной ID из ключевых параметров
-        long_df['sample_id'] = long_df.apply(
-            lambda row: f"{row.get('A_cation', '')}_{row.get('B1_cation', '')}_{row.get('dopant', '')}_{row.get('additive_type', '')}_{row.get('additive_concentration_wt', 0)}",
-            axis=1
-        )
+    if 'sample_id' not in long_df.columns or len(long_df) == 0:
+        # Create composite ID from key parameters
+        if len(long_df) > 0:
+            long_df['sample_id'] = long_df.apply(
+                lambda row: f"{row.get('A_cation', '')}_{row.get('B1_cation', '')}_{row.get('dopant', '')}_{row.get('additive_type', '')}_{row.get('additive_concentration_wt', 0)}",
+                axis=1
+            )
     
-    for sample_id in long_df['sample_id'].unique():
-        sample_data = long_df[long_df['sample_id'] == sample_id]
-        
-        # Take first row for non-temperature dependent fields
-        first_row = sample_data.iloc[0]
-        
-        wide_record = {
-            'sample_id': sample_id,
-            'A_cation': first_row.get('A_cation'),
-            'B1_cation': first_row.get('B1_cation'),
-            'B2_cation': first_row.get('B2_cation'),
-            'B2_cont': first_row.get('B2_cont'),
-            'dopant': first_row.get('dopant'),
-            'dop_cont': first_row.get('dop_cont'),
-            'additive_type': first_row.get('additive_type'),
-            'additive_concentration_wt': first_row.get('additive_concentration_wt'),
-            'additive_incorporation_likely': first_row.get('additive_incorporation_likely'),
-            'method': first_row.get('method'),
-            'T_sin': first_row.get('T_sin'),
-            'structure': first_row.get('structure'),
-            'space_group': first_row.get('space_group'),
-            'a_latt': first_row.get('a_latt'),
-            'b_latt': first_row.get('b_latt'),
-            'c_latt': first_row.get('c_latt'),
-            'density_percent': first_row.get('density_percent'),
-            'grain_size_um': first_row.get('grain_size_um'),
-            'atmosphere': first_row.get('atmosphere'),
-            'humidity': first_row.get('humidity'),
-            'doi': first_row.get('doi'),
-            'Ea_table': first_row.get('Ea_table'),
-            'Ea_calculated': first_row.get('Ea_calculated'),
-            'Ea_calculated_kJ': first_row.get('Ea_calculated_kJ'),
-            'arrhenius_R2': first_row.get('arrhenius_R2'),
-            'r_avg_B': first_row.get('r_avg_B'),
-            'radius_mismatch': first_row.get('radius_mismatch'),
-            'tolerance_factor': first_row.get('tolerance_factor'),
-            'lattice_distortion_index': first_row.get('lattice_distortion_index'),
-            'oxygen_vacancy_conc': first_row.get('oxygen_vacancy_conc'),
-        }
-        
-        # Add conductivity at each temperature
-        for _, temp_row in sample_data.iterrows():
-            T = temp_row['temperature_C']
-            sigma_total = temp_row.get('sigma_total_mS')
-            sigma_bulk = temp_row.get('sigma_bulk_mS')
-            sigma_gb = temp_row.get('sigma_gb_mS')
+    if len(long_df) > 0:
+        for sample_id in long_df['sample_id'].unique():
+            sample_data = long_df[long_df['sample_id'] == sample_id]
             
-            if sigma_total is not None:
-                wide_record[f'sigma_total_{T}C'] = sigma_total
-            if sigma_bulk is not None:
-                wide_record[f'sigma_bulk_{T}C'] = sigma_bulk
-            if sigma_gb is not None:
-                wide_record[f'sigma_gb_{T}C'] = sigma_gb
-        
-        wide_format_data.append(wide_record)
+            # Take first row for non-temperature dependent fields
+            first_row = sample_data.iloc[0]
+            
+            wide_record = {
+                'sample_id': sample_id,
+                'A_cation': first_row.get('A_cation'),
+                'B1_cation': first_row.get('B1_cation'),
+                'B2_cation': first_row.get('B2_cation'),
+                'B2_cont': first_row.get('B2_cont'),
+                'dopant': first_row.get('dopant'),
+                'dop_cont': first_row.get('dop_cont'),
+                'additive_type': first_row.get('additive_type'),
+                'additive_concentration_wt': first_row.get('additive_concentration_wt'),
+                'additive_incorporation_likely': first_row.get('additive_incorporation_likely'),
+                'method': first_row.get('method'),
+                'T_sin': first_row.get('T_sin'),
+                'structure': first_row.get('structure'),
+                'space_group': first_row.get('space_group'),
+                'a_latt': first_row.get('a_latt'),
+                'b_latt': first_row.get('b_latt'),
+                'c_latt': first_row.get('c_latt'),
+                'density_percent': first_row.get('density_percent'),
+                'grain_size_um': first_row.get('grain_size_um'),
+                'atmosphere': first_row.get('atmosphere'),
+                'humidity': first_row.get('humidity'),
+                'doi': first_row.get('doi'),
+                'Ea_table': first_row.get('Ea_table'),
+                'Ea_calculated': first_row.get('Ea_calculated'),
+                'Ea_calculated_kJ': first_row.get('Ea_calculated_kJ'),
+                'arrhenius_R2': first_row.get('arrhenius_R2'),
+                'r_avg_B': first_row.get('r_avg_B'),
+                'radius_mismatch': first_row.get('radius_mismatch'),
+                'tolerance_factor': first_row.get('tolerance_factor'),
+                'lattice_distortion_index': first_row.get('lattice_distortion_index'),
+                'oxygen_vacancy_conc': first_row.get('oxygen_vacancy_conc'),
+            }
+            
+            # Add conductivity at each temperature
+            for _, temp_row in sample_data.iterrows():
+                T = temp_row['temperature_C']
+                sigma_total = temp_row.get('sigma_total_mS')
+                sigma_bulk = temp_row.get('sigma_bulk_mS')
+                sigma_gb = temp_row.get('sigma_gb_mS')
+                
+                if sigma_total is not None and not pd.isna(sigma_total):
+                    wide_record[f'sigma_total_{T}C'] = sigma_total
+                if sigma_bulk is not None and not pd.isna(sigma_bulk):
+                    wide_record[f'sigma_bulk_{T}C'] = sigma_bulk
+                if sigma_gb is not None and not pd.isna(sigma_gb):
+                    wide_record[f'sigma_gb_{T}C'] = sigma_gb
+            
+            wide_format_data.append(wide_record)
     
     wide_df = pd.DataFrame(wide_format_data)
     
