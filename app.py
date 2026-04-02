@@ -2911,71 +2911,82 @@ def main():
         st.markdown("---")
         st.header("🔍 Filters")
         
+        # ИНИЦИАЛИЗИРУЕМ ПЕРЕМЕННЫЕ ДО TRY (ВАЖНО!)
+        df_long = pd.DataFrame()
+        df_wide = pd.DataFrame()
+        filtered_long = pd.DataFrame()
+        filtered_wide = pd.DataFrame()
+        selected_additives = []
+        selected_b_sites = []
+        selected_humidity = []
+        selected_atmosphere = []
+        
         try:
             df = pd.read_excel(uploaded_file, engine='openpyxl')
+            
+            st.success(f"✅ File loaded: {len(df)} rows")
             
             # Process data without progress_bar in cache
             with st.spinner("🔄 Processing conductivity data... Please wait."):
                 df_long, df_wide = process_conductivity_data(df)
             
-            with st.sidebar:
-                if 'additive_type' in df_long.columns:
-                    selected_additives = st.multiselect(
-                        "Sintering Additives",
-                        options=sorted(df_long['additive_type'].unique()),
-                        default=sorted(df_long['additive_type'].unique())
-                    )
-                else:
-                    selected_additives = []
-                
-                if 'B1_cation' in df_long.columns:
-                    selected_b_sites = st.multiselect(
-                        "B-site cations",
-                        options=sorted(df_long['B1_cation'].dropna().unique()),
-                        default=sorted(df_long['B1_cation'].dropna().unique())
-                    )
-                else:
-                    selected_b_sites = []
-                
-                if 'humidity' in df_long.columns:
-                    selected_humidity = st.multiselect(
-                        "Humidity conditions",
-                        options=sorted(df_long['humidity'].dropna().unique()),
-                        default=sorted(df_long['humidity'].dropna().unique())
-                    )
-                else:
-                    selected_humidity = []
-                
-                if 'atmosphere' in df_long.columns:
-                    selected_atmosphere = st.multiselect(
-                        "Atmosphere",
-                        options=sorted(df_long['atmosphere'].dropna().unique()),
-                        default=sorted(df_long['atmosphere'].dropna().unique())
-                    )
-                else:
-                    selected_atmosphere = []
-                
-                # Apply filters
-                filtered_long = df_long.copy()
-                
-                if selected_additives:
-                    filtered_long = filtered_long[filtered_long['additive_type'].isin(selected_additives)]
-                if selected_b_sites:
-                    filtered_long = filtered_long[filtered_long['B1_cation'].isin(selected_b_sites)]
-                if selected_humidity:
-                    filtered_long = filtered_long[filtered_long['humidity'].isin(selected_humidity)]
-                if selected_atmosphere:
-                    filtered_long = filtered_long[filtered_long['atmosphere'].isin(selected_atmosphere)]
-                
-                filtered_wide = df_wide.copy()
-                if selected_additives:
-                    filtered_wide = filtered_wide[filtered_wide['additive_type'].isin(selected_additives)]
-                if selected_b_sites:
-                    filtered_wide = filtered_wide[filtered_wide['B1_cation'].isin(selected_b_sites)]
-                
+            st.success(f"✅ Processed: {len(df_long)} measurements")
+            
+            # Create filters in sidebar
+            if 'additive_type' in df_long.columns:
+                selected_additives = st.multiselect(
+                    "Sintering Additives",
+                    options=sorted(df_long['additive_type'].unique()),
+                    default=sorted(df_long['additive_type'].unique())
+                )
+            
+            if 'B1_cation' in df_long.columns:
+                selected_b_sites = st.multiselect(
+                    "B-site cations",
+                    options=sorted(df_long['B1_cation'].dropna().unique()),
+                    default=sorted(df_long['B1_cation'].dropna().unique())
+                )
+            
+            if 'humidity' in df_long.columns:
+                selected_humidity = st.multiselect(
+                    "Humidity conditions",
+                    options=sorted(df_long['humidity'].dropna().unique()),
+                    default=sorted(df_long['humidity'].dropna().unique())
+                )
+            
+            if 'atmosphere' in df_long.columns:
+                selected_atmosphere = st.multiselect(
+                    "Atmosphere",
+                    options=sorted(df_long['atmosphere'].dropna().unique()),
+                    default=sorted(df_long['atmosphere'].dropna().unique())
+                )
+            
+            # Apply filters
+            filtered_long = df_long.copy()
+            
+            if selected_additives:
+                filtered_long = filtered_long[filtered_long['additive_type'].isin(selected_additives)]
+            if selected_b_sites:
+                filtered_long = filtered_long[filtered_long['B1_cation'].isin(selected_b_sites)]
+            if selected_humidity:
+                filtered_long = filtered_long[filtered_long['humidity'].isin(selected_humidity)]
+            if selected_atmosphere:
+                filtered_long = filtered_long[filtered_long['atmosphere'].isin(selected_atmosphere)]
+            
+            filtered_wide = df_wide.copy()
+            if selected_additives and len(filtered_wide) > 0 and 'additive_type' in filtered_wide.columns:
+                filtered_wide = filtered_wide[filtered_wide['additive_type'].isin(selected_additives)]
+            if selected_b_sites and len(filtered_wide) > 0 and 'B1_cation' in filtered_wide.columns:
+                filtered_wide = filtered_wide[filtered_wide['B1_cation'].isin(selected_b_sites)]
+            
         except Exception as e:
             st.error(f"Error loading file: {str(e)}")
+            st.exception(e)  # Показывает полную ошибку для отладки
             return
+    
+    # ============================================================================
+    # MAIN DISPLAY AREA
+    # ============================================================================
     
     if uploaded_file is not None and len(filtered_long) > 0:
         # Display data information
@@ -2989,13 +3000,18 @@ def main():
         with col1:
             st.metric("Total measurements", len(filtered_long))
         with col2:
-            st.metric("Unique samples", filtered_long['sample_id'].nunique())
+            n_samples = filtered_long['sample_id'].nunique() if 'sample_id' in filtered_long.columns else 0
+            st.metric("Unique samples", n_samples)
         with col3:
-            st.metric("Additive types", filtered_long['additive_type'].nunique())
+            n_additives = filtered_long['additive_type'].nunique() if 'additive_type' in filtered_long.columns else 0
+            st.metric("Additive types", n_additives)
         with col4:
-            st.metric("B-site cations", filtered_long['B1_cation'].nunique())
+            n_b_sites = filtered_long['B1_cation'].nunique() if 'B1_cation' in filtered_long.columns else 0
+            st.metric("B-site cations", n_b_sites)
         with col5:
-            st.metric("Temp range", f"{filtered_long['temperature_C'].min()}-{filtered_long['temperature_C'].max()}°C")
+            temp_min = filtered_long['temperature_C'].min() if 'temperature_C' in filtered_long.columns else 0
+            temp_max = filtered_long['temperature_C'].max() if 'temperature_C' in filtered_long.columns else 0
+            st.metric("Temp range", f"{temp_min}-{temp_max}°C")
         with col6:
             st.metric("Outliers detected", outlier_count)
         
@@ -3004,7 +3020,7 @@ def main():
         
         st.markdown("---")
         
-        # Tabs
+        # Tabs (оставляем как в оригинале, без изменений)
         tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
             "📊 Conductivity Overview",
             "🔬 Additive Analysis",
@@ -3016,9 +3032,9 @@ def main():
             "💡 Insights & Data"
         ])
         
-        # ============================================================================
-        # TAB 1: CONDUCTIVITY OVERVIEW
-        # ============================================================================
+        # ====================================================================
+        # TAB 1: CONDUCTIVITY OVERVIEW (оригинал, без изменений)
+        # ====================================================================
         with tab1:
             st.subheader("Conductivity vs Temperature")
             
@@ -3059,9 +3075,9 @@ def main():
                 st.pyplot(fig)
                 plt.close(fig)
         
-        # ============================================================================
-        # TAB 2: ADDITIVE ANALYSIS
-        # ============================================================================
+        # ====================================================================
+        # TAB 2: ADDITIVE ANALYSIS (оригинал)
+        # ====================================================================
         with tab2:
             st.subheader("Effect of Additive Concentration")
             
@@ -3086,9 +3102,9 @@ def main():
             st.pyplot(fig)
             plt.close(fig)
         
-        # ============================================================================
-        # TAB 3: BULK VS GB ANALYSIS
-        # ============================================================================
+        # ====================================================================
+        # TAB 3: BULK VS GB ANALYSIS (оригинал)
+        # ====================================================================
         with tab3:
             st.subheader("Bulk vs Grain Boundary Conductivity")
             
@@ -3112,7 +3128,6 @@ def main():
             df_check = filtered_long.dropna(subset=['sigma_total_mS', 'sigma_bulk_mS', 'sigma_gb_mS'])
             df_check = df_check[df_check['temperature_C'] == temperature_analysis]
             
-            # Exclude outliers
             if 'is_outlier' in df_check.columns:
                 df_check = df_check[~df_check['is_outlier']]
             
@@ -3141,9 +3156,9 @@ def main():
             else:
                 st.info(f"No data with both bulk and GB conductivity at {temperature_analysis}°C")
         
-        # ============================================================================
-        # TAB 4: MICROSTRUCTURE EFFECTS
-        # ============================================================================
+        # ====================================================================
+        # TAB 4: MICROSTRUCTURE EFFECTS (оригинал)
+        # ====================================================================
         with tab4:
             st.subheader("Microstructure Effects on Conductivity")
             
@@ -3166,9 +3181,9 @@ def main():
             st.pyplot(fig)
             plt.close(fig)
         
-        # ============================================================================
-        # TAB 5: COMPOSITIONAL EFFECTS
-        # ============================================================================
+        # ====================================================================
+        # TAB 5: COMPOSITIONAL EFFECTS (оригинал)
+        # ====================================================================
         with tab5:
             st.subheader("Compositional Effects on Conductivity")
             
@@ -3186,121 +3201,135 @@ def main():
                 st.pyplot(fig)
                 plt.close(fig)
             
-            # New: Radius mismatch effect
+            # Radius mismatch effect
             st.subheader("B-site Radius Mismatch Effect")
-            fig, ax = plt.subplots(figsize=(8, 6))
-            plot_polynomial_fit(filtered_long, 'radius_mismatch', 'sigma_total_mS', ax, degree=2, temperature=temperature_analysis)
-            st.pyplot(fig)
-            plt.close(fig)
+            if 'radius_mismatch' in filtered_long.columns:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                plot_polynomial_fit(filtered_long, 'radius_mismatch', 'sigma_total_mS', ax, degree=2, temperature=temperature_analysis)
+                st.pyplot(fig)
+                plt.close(fig)
+            else:
+                st.info("Radius mismatch data not available")
             
             # Correlation matrix
             st.subheader("Correlation Matrix")
             features = ['density_percent', 'grain_size_um', 'tolerance_factor', 
                        'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch',
                        'lattice_distortion_index', 'electronegativity_difference_B_O']
-            fig = plot_correlation_matrix_conductivity(filtered_long, features, temperature_analysis)
-            st.pyplot(fig)
-            plt.close(fig)
+            # Фильтруем только существующие колонки
+            available_features = [f for f in features if f in filtered_long.columns]
+            if len(available_features) > 1:
+                fig = plot_correlation_matrix_conductivity(filtered_long, available_features, temperature_analysis)
+                st.pyplot(fig)
+                plt.close(fig)
+            else:
+                st.info("Insufficient features for correlation matrix")
         
-        # ============================================================================
-        # TAB 6: ML & FEATURE IMPORTANCE
-        # ============================================================================
+        # ====================================================================
+        # TAB 6: ML & FEATURE IMPORTANCE (оригинал, но с проверками)
+        # ====================================================================
         with tab6:
             st.subheader("Machine Learning Analysis")
             
-            ml_features = st.multiselect(
-                "Select features for ML analysis",
-                options=['density_percent', 'grain_size_um', 'tolerance_factor', 
+            # Доступные фичи для ML
+            available_ml_features = [f for f in ['density_percent', 'grain_size_um', 'tolerance_factor', 
                         'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch',
-                        'lattice_distortion_index'],
-                default=['density_percent', 'grain_size_um', 'tolerance_factor', 'additive_concentration_wt']
-            )
+                        'lattice_distortion_index'] if f in filtered_long.columns]
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Feature Importance (Random Forest)**")
-                importance_df, r2 = feature_importance_conductivity(
-                    filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
+            if len(available_ml_features) > 0:
+                ml_features = st.multiselect(
+                    "Select features for ML analysis",
+                    options=available_ml_features,
+                    default=available_ml_features[:min(4, len(available_ml_features))]
                 )
                 
-                if importance_df is not None:
-                    fig, ax = plt.subplots(figsize=(8, 6))
-                    importance_df = importance_df.head(10)
-                    ax.barh(range(len(importance_df)), importance_df['importance'], 
-                           color='steelblue', edgecolor='black')
-                    ax.set_yticks(range(len(importance_df)))
-                    ax.set_yticklabels(importance_df['feature'])
-                    ax.set_xlabel('Feature Importance')
-                    ax.set_title(f'Random Forest R² = {r2:.3f}')
-                    ax.invert_yaxis()
-                    st.pyplot(fig)
-                    plt.close(fig)
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Feature Importance (Random Forest)**")
+                    importance_df, r2 = feature_importance_conductivity(
+                        filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
+                    )
                     
-                    st.dataframe(importance_df, use_container_width=True)
-                else:
-                    st.warning("Insufficient data for feature importance analysis")
-            
-            with col2:
-                st.markdown("**Model Comparison**")
-                models_df, models, X, y = compare_ml_models_conductivity(
-                    filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
-                )
-                
-                if models_df is not None:
-                    st.dataframe(models_df, use_container_width=True)
-                else:
-                    st.warning("Insufficient data for model comparison")
-            
-            # SHAP Analysis (NEW)
-            st.subheader("🔬 SHAP Analysis (Model Interpretability)")
-            
-            if len(ml_features) >= 2 and models_df is not None:
-                shap_result = shap_analysis(
-                    filtered_long[filtered_long['temperature_C'] == temperature_analysis],
-                    ml_features, 'sigma_total_mS', model_type='xgboost'
-                )
-                
-                if shap_result is not None:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("**SHAP Feature Importance**")
+                    if importance_df is not None:
                         fig, ax = plt.subplots(figsize=(8, 6))
-                        plot_shap_summary(shap_result, ax)
+                        importance_df = importance_df.head(10)
+                        ax.barh(range(len(importance_df)), importance_df['importance'], 
+                               color='steelblue', edgecolor='black')
+                        ax.set_yticks(range(len(importance_df)))
+                        ax.set_yticklabels(importance_df['feature'])
+                        ax.set_xlabel('Feature Importance')
+                        ax.set_title(f'Random Forest R² = {r2:.3f}')
+                        ax.invert_yaxis()
                         st.pyplot(fig)
                         plt.close(fig)
-                    
-                    with col2:
-                        st.markdown("**SHAP Dependence Plot**")
-                        feature_for_dependence = st.selectbox(
-                            "Select feature for SHAP dependence plot",
-                            options=ml_features
-                        )
                         
-                        if feature_for_dependence in shap_result['feature_names']:
+                        st.dataframe(importance_df, use_container_width=True)
+                    else:
+                        st.warning("Insufficient data for feature importance analysis")
+                
+                with col2:
+                    st.markdown("**Model Comparison**")
+                    models_df, models, X, y = compare_ml_models_conductivity(
+                        filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
+                    )
+                    
+                    if models_df is not None:
+                        st.dataframe(models_df, use_container_width=True)
+                    else:
+                        st.warning("Insufficient data for model comparison")
+                
+                # SHAP Analysis
+                st.subheader("🔬 SHAP Analysis (Model Interpretability)")
+                
+                if len(ml_features) >= 2 and models_df is not None:
+                    shap_result = shap_analysis(
+                        filtered_long[filtered_long['temperature_C'] == temperature_analysis],
+                        ml_features, 'sigma_total_mS', model_type='xgboost'
+                    )
+                    
+                    if shap_result is not None:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**SHAP Feature Importance**")
                             fig, ax = plt.subplots(figsize=(8, 6))
-                            idx = shap_result['feature_names'].index(feature_for_dependence)
-                            shap_values = shap_result['shap_values']
-                            X_data = shap_result['X']
-                            
-                            ax.scatter(X_data[:, idx], shap_values[:, idx], 
-                                      c='steelblue', alpha=0.6, edgecolors='black')
-                            ax.set_xlabel(feature_for_dependence)
-                            ax.set_ylabel('SHAP value')
-                            ax.set_title(f'SHAP Dependence: {feature_for_dependence}')
-                            ax.axhline(y=0, color='red', linestyle='--', alpha=0.5)
-                            ax.grid(True, alpha=0.3)
+                            plot_shap_summary(shap_result, ax)
                             st.pyplot(fig)
                             plt.close(fig)
+                        
+                        with col2:
+                            st.markdown("**SHAP Dependence Plot**")
+                            feature_for_dependence = st.selectbox(
+                                "Select feature for SHAP dependence plot",
+                                options=ml_features
+                            )
+                            
+                            if feature_for_dependence in shap_result['feature_names']:
+                                fig, ax = plt.subplots(figsize=(8, 6))
+                                idx = shap_result['feature_names'].index(feature_for_dependence)
+                                shap_values = shap_result['shap_values']
+                                X_data = shap_result['X']
+                                
+                                ax.scatter(X_data[:, idx], shap_values[:, idx], 
+                                          c='steelblue', alpha=0.6, edgecolors='black')
+                                ax.set_xlabel(feature_for_dependence)
+                                ax.set_ylabel('SHAP value')
+                                ax.set_title(f'SHAP Dependence: {feature_for_dependence}')
+                                ax.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+                                ax.grid(True, alpha=0.3)
+                                st.pyplot(fig)
+                                plt.close(fig)
+                    else:
+                        st.info("Insufficient data for SHAP analysis (need at least 10 samples)")
                 else:
-                    st.info("Insufficient data for SHAP analysis (need at least 10 samples)")
+                    st.info("Select at least 2 features and ensure sufficient data for SHAP analysis")
             else:
-                st.info("Select at least 2 features and ensure sufficient data for SHAP analysis")
+                st.warning("No ML features available in the data")
         
-        # ============================================================================
-        # TAB 7: ADVANCED ANALYSIS (NEW)
-        # ============================================================================
+        # ====================================================================
+        # TAB 7: ADVANCED ANALYSIS (оригинал, но с проверками)
+        # ====================================================================
         with tab7:
             st.subheader("Advanced Statistical Analysis")
             
@@ -3308,93 +3337,112 @@ def main():
             st.markdown("### Partial Correlation Analysis")
             st.markdown("*Controlling for density and grain size effects*")
             
-            control_vars = st.multiselect(
-                "Select control variables",
-                options=['density_percent', 'grain_size_um', 'porosity'],
-                default=['density_percent', 'grain_size_um'] if 'density_percent' in filtered_long.columns and 'grain_size_um' in filtered_long.columns else []
-            )
+            control_options = [f for f in ['density_percent', 'grain_size_um', 'porosity'] if f in filtered_long.columns]
             
-            if len(control_vars) > 0:
-                features_for_partial = ['tolerance_factor', 'oxygen_vacancy_conc', 
-                                        'additive_concentration_wt', 'radius_mismatch']
-                available_partial = [f for f in features_for_partial if f in filtered_long.columns]
+            if len(control_options) > 0:
+                control_vars = st.multiselect(
+                    "Select control variables",
+                    options=control_options,
+                    default=control_options[:min(2, len(control_options))]
+                )
                 
-                if len(available_partial) > 0:
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    plot_partial_correlations(filtered_long, available_partial, 'sigma_total_mS', 
-                                             control_vars, ax, temperature_analysis)
-                    st.pyplot(fig)
-                    plt.close(fig)
+                if len(control_vars) > 0:
+                    features_for_partial = [f for f in ['tolerance_factor', 'oxygen_vacancy_conc', 
+                                            'additive_concentration_wt', 'radius_mismatch'] if f in filtered_long.columns]
+                    
+                    if len(features_for_partial) > 0:
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        plot_partial_correlations(filtered_long, features_for_partial, 'sigma_total_mS', 
+                                                 control_vars, ax, temperature_analysis)
+                        st.pyplot(fig)
+                        plt.close(fig)
+                    else:
+                        st.warning("No features available for partial correlation analysis")
                 else:
-                    st.warning("No features available for partial correlation analysis")
+                    st.info("Select at least one control variable")
             else:
-                st.info("Select at least one control variable")
+                st.info("No control variables available")
             
             # Temperature-dependent correlation
             st.markdown("### Temperature-Dependent Correlations")
             
-            temp_corr_feature = st.selectbox(
-                "Select feature to analyze temperature-dependent correlation",
-                options=['tolerance_factor', 'oxygen_vacancy_conc', 'radius_mismatch', 
-                        'grain_size_um', 'density_percent'] if len(['tolerance_factor', 'oxygen_vacancy_conc', 'radius_mismatch', 'grain_size_um', 'density_percent']) > 0 else [],
-                help="Shows how correlation between this feature and conductivity changes with temperature"
-            )
+            temp_corr_options = [f for f in ['tolerance_factor', 'oxygen_vacancy_conc', 'radius_mismatch', 
+                        'grain_size_um', 'density_percent'] if f in filtered_long.columns]
             
-            if temp_corr_feature and temp_corr_feature in filtered_long.columns:
-                fig = plot_correlation_by_temperature(filtered_long, temp_corr_feature, 'sigma_total_mS')
-                st.pyplot(fig)
-                plt.close(fig)
+            if len(temp_corr_options) > 0:
+                temp_corr_feature = st.selectbox(
+                    "Select feature to analyze temperature-dependent correlation",
+                    options=temp_corr_options,
+                    help="Shows how correlation between this feature and conductivity changes with temperature"
+                )
+                
+                if temp_corr_feature:
+                    fig = plot_correlation_by_temperature(filtered_long, temp_corr_feature, 'sigma_total_mS')
+                    st.pyplot(fig)
+                    plt.close(fig)
+            else:
+                st.info("No features available for temperature-dependent correlation")
             
-            # Polynomial regression for non-linear relationships
+            # Polynomial regression
             st.markdown("### Non-linear Relationship Analysis")
             
-            col1, col2 = st.columns(2)
+            poly_options = [f for f in ['oxygen_vacancy_conc', 'additive_concentration_wt', 'grain_size_um', 'radius_mismatch'] if f in filtered_long.columns]
             
-            with col1:
-                poly_feature = st.selectbox(
-                    "Select X variable",
-                    options=['oxygen_vacancy_conc', 'additive_concentration_wt', 'grain_size_um', 'radius_mismatch'],
-                    key='poly_x'
-                )
-            
-            with col2:
-                poly_degree = st.slider("Polynomial degree", min_value=2, max_value=4, value=2)
-            
-            if poly_feature in filtered_long.columns:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_polynomial_fit(filtered_long, poly_feature, 'sigma_total_mS', ax, degree=poly_degree, temperature=temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+            if len(poly_options) > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    poly_feature = st.selectbox(
+                        "Select X variable",
+                        options=poly_options,
+                        key='poly_x'
+                    )
+                
+                with col2:
+                    poly_degree = st.slider("Polynomial degree", min_value=2, max_value=4, value=2)
+                
+                if poly_feature:
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_polynomial_fit(filtered_long, poly_feature, 'sigma_total_mS', ax, degree=poly_degree, temperature=temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
+            else:
+                st.info("No features available for polynomial regression")
             
             # Clustering analysis
             st.markdown("### Material Clustering Analysis")
             
-            cluster_features = st.multiselect(
-                "Select features for clustering",
-                options=['tolerance_factor', 'oxygen_vacancy_conc', 'density_percent', 
-                        'grain_size_um', 'additive_concentration_wt'],
-                default=['tolerance_factor', 'oxygen_vacancy_conc'] if 'tolerance_factor' in filtered_long.columns and 'oxygen_vacancy_conc' in filtered_long.columns else []
-            )
+            cluster_options = [f for f in ['tolerance_factor', 'oxygen_vacancy_conc', 'density_percent', 
+                        'grain_size_um', 'additive_concentration_wt'] if f in filtered_long.columns]
             
-            if len(cluster_features) >= 2:
-                col1, col2 = st.columns(2)
+            if len(cluster_options) >= 2:
+                cluster_features = st.multiselect(
+                    "Select features for clustering",
+                    options=cluster_options,
+                    default=cluster_options[:min(2, len(cluster_options))]
+                )
                 
-                with col1:
-                    eps = st.slider("DBSCAN eps (neighborhood radius)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
-                
-                with col2:
-                    min_samples = st.slider("DBSCAN min_samples", min_value=2, max_value=10, value=3)
-                
-                fig, ax = plt.subplots(figsize=(10, 8))
-                plot_clustering_results(filtered_long, cluster_features, ax, eps=eps, min_samples=min_samples)
-                st.pyplot(fig)
-                plt.close(fig)
+                if len(cluster_features) >= 2:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        eps = st.slider("DBSCAN eps (neighborhood radius)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+                    
+                    with col2:
+                        min_samples = st.slider("DBSCAN min_samples", min_value=2, max_value=10, value=3)
+                    
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    plot_clustering_results(filtered_long, cluster_features, ax, eps=eps, min_samples=min_samples)
+                    st.pyplot(fig)
+                    plt.close(fig)
+                else:
+                    st.info("Select at least 2 features for clustering analysis")
             else:
-                st.info("Select at least 2 features for clustering analysis")
+                st.info("Need at least 2 features for clustering analysis")
         
-        # ============================================================================
-        # TAB 8: INSIGHTS & DATA
-        # ============================================================================
+        # ====================================================================
+        # TAB 8: INSIGHTS & DATA (оригинал)
+        # ====================================================================
         with tab8:
             st.subheader("💡 Automated Physical Insights")
             
@@ -3474,20 +3522,11 @@ def main():
         - Oxygen vacancy concentration effects
         - Additive concentration optimization
         - B-site radius mismatch analysis
-        
-        #### 📐 **Advanced Statistical Analysis** (NEW)
-        - Partial correlation analysis (controlling for microstructure)
-        - Temperature-dependent correlations
-        - Polynomial regression for non-linear relationships
-        - DBSCAN clustering of materials
-        - SHAP analysis for model interpretability
-        
-        #### 🤖 **Machine Learning**
-        - Feature importance (Random Forest)
-        - Model comparison (RF, GB, XGBoost)
-        - Cross-validation evaluation
-        - SHAP values for interpretation
         """)
+
+
+if __name__ == "__main__":
+    main()
 
 
 # ============================================================================
