@@ -1283,25 +1283,22 @@ def shap_analysis(df, features, target, model_type='xgboost'):
 # ENHANCED DATA PROCESSING FUNCTION
 # ============================================================================
 @st.cache_data
-def process_conductivity_data(df, progress_bar=None):
+def process_conductivity_data(df):
     """
     Main function for processing conductivity data.
+    
+    NOTE: progress_bar cannot be cached. Use st.spinner() or st.progress() outside.
     
     Parameters
     ----------
     df : pandas.DataFrame
         Source data
-    progress_bar : st.progress, optional
-        Progress bar for tracking
     
     Returns
     -------
     tuple
         (long_format_df, wide_format_df) processed data
     """
-    if progress_bar:
-        progress_bar.progress(0, text="Starting data processing...")
-    
     df_processed = df.copy()
     
     # Preprocess: fill NaN values with 0 for numeric columns where appropriate
@@ -1310,9 +1307,6 @@ def process_conductivity_data(df, progress_bar=None):
         if col in df_processed.columns:
             df_processed[col] = df_processed[col].apply(safe_float_converter)
             df_processed[col] = df_processed[col].fillna(0)
-    
-    if progress_bar:
-        progress_bar.progress(0.1, text="Creating processor...")
     
     processor = ConductivityDataProcessor()
     
@@ -1323,10 +1317,6 @@ def process_conductivity_data(df, progress_bar=None):
     
     # Iterate through rows
     for idx, row in df_processed.iterrows():
-        if progress_bar:
-            progress_bar.progress(0.1 + 0.4 * (idx / total_rows), 
-                                 text=f"Processing sample {idx+1}/{total_rows}...")
-        
         # Basic composition parameters
         a_cation = row.get('A cation', 'Ba')
         b1_cation = row.get('B1 cation', None)
@@ -1463,7 +1453,7 @@ def process_conductivity_data(df, progress_bar=None):
                 record['gb_resistance_fraction'] = None
                 record['bulk_resistance_fraction'] = None
             
-            # Add geometric descriptors (NEW)
+            # Add geometric descriptors
             record['r_avg_B'] = formula_desc.get('r_avg_B')
             record['radius_mismatch'] = formula_desc.get('radius_mismatch')
             record['tolerance_factor'] = formula_desc.get('tolerance_factor')
@@ -1477,9 +1467,6 @@ def process_conductivity_data(df, progress_bar=None):
             
             long_format_data.append(record)
     
-    if progress_bar:
-        progress_bar.progress(0.6, text="Creating long format DataFrame...")
-    
     # Create long format DataFrame
     long_df = pd.DataFrame(long_format_data)
     
@@ -1490,11 +1477,7 @@ def process_conductivity_data(df, progress_bar=None):
     else:
         long_df['is_outlier'] = False
     
-    if progress_bar:
-        progress_bar.progress(0.8, text="Creating wide format from long format...")
-    
     # Create wide format FROM long format (not recalculating)
-    # This eliminates the double calculation issue
     wide_format_data = []
     
     for sample_id in long_df['sample_id'].unique():
@@ -1554,10 +1537,6 @@ def process_conductivity_data(df, progress_bar=None):
         wide_format_data.append(wide_record)
     
     wide_df = pd.DataFrame(wide_format_data)
-    
-    if progress_bar:
-        progress_bar.progress(1.0, text="Processing complete!")
-        time.sleep(0.5)
     
     return long_df, wide_df
 
@@ -2926,20 +2905,11 @@ def main():
         st.header("🔍 Filters")
         
         try:
-            # Show progress bar for file loading and processing
-            progress_bar = st.progress(0, text="Loading file...")
-            
             df = pd.read_excel(uploaded_file, engine='openpyxl')
             
-            progress_bar.progress(0.3, text="Processing conductivity data...")
-            
-            df_long, df_wide = process_conductivity_data(df, progress_bar)
-            
-            progress_bar.progress(0.9, text="Finalizing...")
-            
-            # Clear progress bar after completion
-            time.sleep(0.5)
-            progress_bar.empty()
+            # Process data without progress_bar in cache
+            with st.spinner("🔄 Processing conductivity data... Please wait."):
+                df_long, df_wide = process_conductivity_data(df)
             
             with st.sidebar:
                 if 'additive_type' in df_long.columns:
