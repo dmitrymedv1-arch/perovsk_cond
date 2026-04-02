@@ -2575,7 +2575,12 @@ def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', a
     target : str
         Target column name (default: 'sigma_total_mS')
     ax : matplotlib.axes.Axes
-        Axes to plot on
+        Axes to plot on (if None, creates new figure)
+    
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure object
     """
     temperatures = sorted(df_long['temperature_C'].unique())
     
@@ -2597,8 +2602,11 @@ def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', a
             correlations.append(np.nan)
             p_values.append(np.nan)
     
+    # Создаем фигуру если ax не предоставлен
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6))
+    else:
+        fig = ax.figure
     
     # Plot correlation
     ax.plot(temperatures, correlations, 'o-', color='#377EB8', linewidth=2, markersize=6)
@@ -2619,7 +2627,7 @@ def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', a
     if any(p < 0.05 for p in p_values if not np.isnan(p)):
         ax.annotate('* p < 0.05', xy=(0.02, 0.98), xycoords='axes fraction', fontsize=8)
     
-    return ax
+    return fig  # Возвращаем Figure, а не Axes
 
 
 # ============================================================================
