@@ -1388,7 +1388,7 @@ def process_conductivity_data(df):
             T_C = sigma_data['temperature_C']
             
             record = {
-                'sample_id': idx,
+                'sample_id': int(idx) if not isinstance(idx, (int, np.integer)) else idx,
                 'A_cation': a_cation,
                 'B1_cation': b1_cation,
                 'B2_cation': b2_cation,
