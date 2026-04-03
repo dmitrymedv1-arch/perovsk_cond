@@ -34,6 +34,187 @@ import time
 warnings.filterwarnings('ignore')
 
 # ============================================================================
+# CUSTOM CSS FOR MODERN SCIENTIFIC UI
+# ============================================================================
+def apply_custom_css():
+    """Apply modern scientific styling to the Streamlit app"""
+    st.markdown("""
+    <style>
+    /* Main container styling */
+    .main {
+        background-color: #0F172A;
+    }
+    
+    /* Block container styling */
+    .stApp {
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+    }
+    
+    /* Metric cards */
+    .stMetric {
+        background: #1E293B;
+        border-radius: 12px;
+        padding: 12px;
+        border: 1px solid #334155;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s;
+    }
+    
+    .stMetric:hover {
+        transform: translateY(-2px);
+        border-color: #3B82F6;
+    }
+    
+    /* Headers */
+    h1, h2, h3, h4, h5, h6 {
+        color: #F1F5F9 !important;
+        font-weight: 600 !important;
+    }
+    
+    h1 {
+        border-bottom: 3px solid #3B82F6;
+        padding-bottom: 10px;
+        display: inline-block;
+    }
+    
+    h2 {
+        border-left: 4px solid #3B82F6;
+        padding-left: 15px;
+        margin-top: 20px;
+    }
+    
+    h3 {
+        color: #94A3B8 !important;
+    }
+    
+    /* Buttons */
+    .stButton button {
+        background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    
+    .stButton button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+    }
+    
+    /* DataFrames */
+    .stDataFrame {
+        border-radius: 12px;
+        border: 1px solid #334155;
+        background: #1E293B;
+    }
+    
+    /* Info/Warning/Success boxes */
+    .stAlert {
+        border-radius: 8px;
+        border-left: 4px solid;
+    }
+    
+    .stAlert[data-baseweb="notification"] {
+        background-color: #1E293B;
+    }
+    
+    /* Select boxes */
+    .stSelectbox label, .stMultiSelect label {
+        color: #94A3B8 !important;
+        font-weight: 500 !important;
+    }
+    
+    /* Sliders */
+    .stSlider label {
+        color: #94A3B8 !important;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #1E293B;
+        border-radius: 12px;
+        padding: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background-color: #334155;
+        border-radius: 8px;
+        padding: 8px 16px;
+        color: #94A3B8;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+        color: white;
+    }
+    
+    /* Expanders */
+    .streamlit-expanderHeader {
+        background-color: #1E293B;
+        border-radius: 8px;
+        color: #F1F5F9;
+        font-weight: 500;
+    }
+    
+    /* Progress bars */
+    .stProgress > div > div {
+        background-color: #3B82F6;
+    }
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #1E293B;
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #3B82F6;
+        border-radius: 4px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #2563EB;
+    }
+    
+    /* Plot containers */
+    .plot-container {
+        background: #1E293B;
+        border-radius: 12px;
+        padding: 16px;
+        border: 1px solid #334155;
+        margin: 16px 0;
+    }
+    
+    /* Sidebar */
+    .css-1d391kg, .css-12ttj6m {
+        background-color: #0F172A;
+        border-right: 1px solid #334155;
+    }
+    
+    /* Footer */
+    .footer {
+        text-align: center;
+        padding: 20px;
+        color: #64748B;
+        font-size: 12px;
+        border-top: 1px solid #334155;
+        margin-top: 40px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ============================================================================
 # CONSTANTS
 # ============================================================================
 AVOGADRO_NUMBER = 6.02214076e23  # mol⁻¹
@@ -49,12 +230,12 @@ plt.rcParams.update({
     'axes.labelweight': 'bold',
     'axes.titlesize': 12,
     'axes.titleweight': 'bold',
-    'axes.facecolor': 'white',
-    'axes.edgecolor': 'black',
+    'axes.facecolor': '#1E293B',
+    'axes.edgecolor': '#334155',
     'axes.linewidth': 1.0,
     'axes.grid': False,
-    'xtick.color': 'black',
-    'ytick.color': 'black',
+    'xtick.color': '#94A3B8',
+    'ytick.color': '#94A3B8',
     'xtick.labelsize': 10,
     'ytick.labelsize': 10,
     'xtick.direction': 'out',
@@ -68,13 +249,15 @@ plt.rcParams.update({
     'legend.fontsize': 10,
     'legend.frameon': True,
     'legend.framealpha': 0.9,
-    'legend.edgecolor': 'black',
+    'legend.edgecolor': '#334155',
     'legend.fancybox': False,
     'figure.dpi': 600,
     'savefig.dpi': 600,
     'savefig.bbox': 'tight',
     'savefig.pad_inches': 0.1,
-    'figure.facecolor': 'white',
+    'figure.facecolor': '#0F172A',
+    'axes.labelcolor': '#F1F5F9',
+    'text.color': '#F1F5F9',
     'lines.linewidth': 1.5,
     'lines.markersize': 6,
     'errorbar.capsize': 3,
@@ -300,12 +483,12 @@ B_COLORS = {
 
 # Color map for sintering additives
 SINTERING_ADDITIVE_COLORS = {
-    'Pure': '#4DAF4A',
-    'Cu': '#E41A1C',
-    'Ni': '#377EB8',
-    'Zn': '#984EA3',
-    'Co': '#FF7F00',
-    'default': '#999999'
+    'Pure': '#10B981',
+    'Cu': '#EF4444',
+    'Ni': '#3B82F6',
+    'Zn': '#8B5CF6',
+    'Co': '#F59E0B',
+    'default': '#6B7280'
 }
 
 # Markers for sintering additives
@@ -468,16 +651,15 @@ class FlexibleColumnMapper:
 
 
 # ============================================================================
-# NEW FUNCTION: READ EXCEL WITH MULTI-ROW HEADER
+# NEW FUNCTION: READ EXCEL WITH SINGLE ROW HEADER
 # ============================================================================
-def read_excel_with_multirow_header(uploaded_file):
+def read_excel_simple(uploaded_file):
     """
-    Read Excel file with multi-row header structure.
+    Read Excel file with single row header structure.
     
     The Excel file has:
-    - Row 1: Units and repeated headers (e.g., "σ total, mS" repeated for each temperature)
-    - Row 2: Column names (A cation, B1 cation, etc.)
-    - Row 3 onwards: Data
+    - Row 1: Column names (A cation, B1 cation, σ total, 200, σ bulk, 200, σ gb, 200, etc.)
+    - Row 2 onwards: Data
     
     Parameters
     ----------
@@ -489,75 +671,14 @@ def read_excel_with_multirow_header(uploaded_file):
     pandas.DataFrame
         Processed dataframe with proper column names
     """
-    # First, read the first two rows to understand header structure
-    header_rows = pd.read_excel(
-        uploaded_file, 
-        engine='openpyxl', 
-        header=None, 
-        nrows=2
-    )
+    # Read the Excel file with header on first row
+    df = pd.read_excel(uploaded_file, engine='openpyxl', header=0)
     
-    row1 = header_rows.iloc[0].fillna('')
-    row2 = header_rows.iloc[1].fillna('')
+    # Clean column names: strip whitespace
+    df.columns = df.columns.str.strip()
     
-    # Read the actual data starting from row 3 (index 2)
-    df = pd.read_excel(
-        uploaded_file, 
-        engine='openpyxl', 
-        header=2  # Start reading from row 3 as data
-    )
-    
-    # Build column names by combining row1 and row2
-    new_columns = []
-    conductivity_pattern = re.compile(r'σ\s*total|σ\s*bulk|σ\s*gb|sigma_total|sigma_bulk|sigma_gb', re.IGNORECASE)
-    temp_pattern = re.compile(r'\d{3}')
-    
-    for i, (val1, val2) in enumerate(zip(row1, row2)):
-        val1_str = str(val1).strip() if not pd.isna(val1) else ''
-        val2_str = str(val2).strip() if not pd.isna(val2) else ''
-        
-        # If val2 is empty, use val1
-        if val2_str == '' or val2_str == 'nan':
-            if val1_str != '' and val1_str != 'nan':
-                new_columns.append(val1_str)
-            else:
-                new_columns.append(f'col_{i}')
-            continue
-        
-        # Check if this is a conductivity column (val1 contains conductivity type, val2 contains temperature)
-        if conductivity_pattern.search(val1_str) and temp_pattern.search(val2_str):
-            # Extract temperature
-            temp_match = temp_pattern.search(val2_str)
-            temp = temp_match.group(0) if temp_match else ''
-            
-            # Determine conductivity type
-            if 'total' in val1_str.lower() or 'σ total' in val1_str:
-                new_columns.append(f'sigma_total_mS_{temp}')
-            elif 'bulk' in val1_str.lower() or 'σ bulk' in val1_str:
-                new_columns.append(f'sigma_bulk_mS_{temp}')
-            elif 'gb' in val1_str.lower() or 'σ gb' in val1_str:
-                new_columns.append(f'sigma_gb_mS_{temp}')
-            else:
-                new_columns.append(f'{val1_str}_{val2_str}')
-        else:
-            # Regular column
-            if val2_str and val2_str != 'nan':
-                new_columns.append(val2_str)
-            else:
-                new_columns.append(val1_str)
-    
-    # Assign column names
-    df.columns = new_columns
-    
-    # Clean up: remove rows where A cation is empty
-    if 'A cation' in df.columns:
-        df = df.dropna(subset=['A cation'], how='all')
-    
-    # Also remove rows where all key columns are empty
-    key_cols = ['A cation', 'B1 cation', 'Сд']
-    existing_key_cols = [col for col in key_cols if col in df.columns]
-    if existing_key_cols:
-        df = df.dropna(subset=existing_key_cols, how='all')
+    # Remove any completely empty rows
+    df = df.dropna(how='all')
     
     # Reset index
     df = df.reset_index(drop=True)
@@ -566,7 +687,7 @@ def read_excel_with_multirow_header(uploaded_file):
 
 
 # ============================================================================
-# NEW FUNCTION: EXTRAPOLATE CONDUCTIVITY
+# NEW FUNCTION: EXTRAPOLATE CONDUCTIVITY (without Ea)
 # ============================================================================
 def extrapolate_conductivity(sigma_data, target_temperature):
     """
@@ -1078,10 +1199,11 @@ class ConductivityDataProcessor:
             # Find column using flexible mapper
             col_name = self.column_mapper.find_column(row.to_frame().T, col_type, T)
             
-            # Also check for direct column names like 'sigma_total_mS_600'
+            # Also check for direct column names like 'sigma_total_mS_600' or 'σ total, 600'
             if col_name is None:
                 for col in row.index:
                     col_str = str(col).lower()
+                    # Check for pattern like "σ total, 600" or "σ total 600"
                     if col_type.replace('sigma_', '') in col_str and str(T) in col_str:
                         col_name = col
                         break
@@ -1133,95 +1255,6 @@ class ConductivityDataProcessor:
         upper_bound = Q3 + multiplier * IQR
         
         return (data[column] < lower_bound) | (data[column] > upper_bound)
-    
-    def calculate_arrhenius_params(self, sigma_data):
-        """
-        Calculate Arrhenius parameters from conductivity data.
-        
-        FIXED: Added physical validity checks to prevent negative activation energies.
-        
-        Parameters
-        ----------
-        sigma_data : list of dict
-            Conductivity data at different temperatures
-        
-        Returns
-        -------
-        dict
-            Arrhenius parameters: Ea, A, R²
-        """
-        if len(sigma_data) < 3:
-            return {'Ea': None, 'A': None, 'R2': None, 'has_data': False}
-        
-        # Transform for Arrhenius plot: ln(σT) vs 1000/T
-        temps = []
-        ln_sigmaT = []
-        
-        for data in sigma_data:
-            T_K = data['temperature_K']
-            # Get the sigma value (key may vary)
-            sigma_key = [k for k in data.keys() if 'sigma' in k and 'mS' in k][0] if data else None
-            if sigma_key:
-                sigma = data[sigma_key]
-                if sigma is not None and sigma > 1e-6 and T_K > 273.15:
-                    ln_val = np.log(sigma * T_K)
-                    if np.isfinite(ln_val):
-                        ln_sigmaT.append(ln_val)
-                        temps.append(1000.0 / T_K)
-        
-        if len(temps) < 3:
-            return {'Ea': None, 'A': None, 'R2': None, 'has_data': False}
-        
-        # Linear regression
-        try:
-            slope, intercept, r_value, p_value, std_err = stats.linregress(temps, ln_sigmaT)
-            
-            # Ea = slope * R (where R = 8.314 J/(mol·K) = 0.008314 kJ/(mol·K))
-            # For convenience, Ea in eV: 1 eV = 96.485 kJ/mol
-            Ea_kJ = slope * GAS_CONSTANT / 1000.0  # kJ/mol
-            Ea_eV = Ea_kJ / 96.485  # eV
-            
-            # FIXED: Physical validity check - Ea should be positive for semiconductors
-            if Ea_eV < 0:
-                # Try using ln(σ) instead of ln(σT) - sometimes works better
-                temps2 = []
-                ln_sigma2 = []
-                for data in sigma_data:
-                    T_K = data['temperature_K']
-                    sigma_key = [k for k in data.keys() if 'sigma' in k and 'mS' in k][0] if data else None
-                    if sigma_key:
-                        sigma = data[sigma_key]
-                        if sigma is not None and sigma > 1e-6 and T_K > 273.15:
-                            ln_sigma2.append(np.log(sigma))
-                            temps2.append(1000.0 / T_K)
-                
-                if len(temps2) >= 3:
-                    slope2, intercept2, r2, p2, se2 = stats.linregress(temps2, ln_sigma2)
-                    Ea_kJ2 = slope2 * GAS_CONSTANT / 1000.0
-                    Ea_eV2 = Ea_kJ2 / 96.485
-                    
-                    if Ea_eV2 > 0:
-                        return {
-                            'Ea': Ea_eV2,
-                            'Ea_kJ': Ea_kJ2,
-                            'A': np.exp(intercept2),
-                            'R2': r2 ** 2,
-                            'has_data': True,
-                            'n_points': len(temps2),
-                            'note': 'Calculated using ln(σ) method'
-                        }
-            
-            # Return positive Ea (clamp to zero if negative)
-            return {
-                'Ea': max(0, Ea_eV),
-                'Ea_kJ': max(0, Ea_kJ),
-                'A': np.exp(intercept),
-                'R2': r_value ** 2,
-                'has_data': True,
-                'n_points': len(temps)
-            }
-        except (ValueError, TypeError, stats.LinAlgError):
-            return {'Ea': None, 'A': None, 'R2': None, 'has_data': False}
     
     def calculate_gb_contribution(self, sigma_total_data, sigma_bulk_data, sigma_gb_data):
         """
@@ -1531,24 +1564,26 @@ def shap_analysis(df, features, target, model_type='xgboost'):
 
 
 # ============================================================================
-# ENHANCED DATA PROCESSING FUNCTION
+# CACHED DATA PROCESSING FUNCTIONS
 # ============================================================================
-@st.cache_data
-def process_conductivity_data(df):
+@st.cache_data(ttl=3600, show_spinner="Loading and processing data...")
+def load_and_process_data(uploaded_file):
     """
-    Main function for processing conductivity data.
-    Enhanced version with proper handling of multi-row headers.
+    Load and process the Excel file with caching.
     
     Parameters
     ----------
-    df : pandas.DataFrame
-        Source data (already loaded with proper column names)
-    
+    uploaded_file : UploadedFile
+        Streamlit uploaded file object
+        
     Returns
     -------
     tuple
         (long_format_df, wide_format_df) processed data
     """
+    # Read the Excel file with simple header
+    df = read_excel_simple(uploaded_file)
+    
     df_processed = df.copy()
     
     # Preprocess: fill NaN values with 0 for numeric columns where appropriate
@@ -1620,9 +1655,6 @@ def process_conductivity_data(df):
         atmosphere = row.get('Атмосфера', None)
         humidity = row.get('Влажность', None)
         doi = row.get('ссылка', None)
-        
-        # Ea from table (if available)
-        Ea_table = row.get('Ea, эВ', None)
         
         # Update calculator's A-element if different
         if a_cation != processor.calculator.a_element:
@@ -1731,9 +1763,6 @@ def process_conductivity_data(df):
                     except (ValueError, TypeError):
                         pass
         
-        # Calculate Arrhenius parameters
-        arrhenius = processor.calculate_arrhenius_params(sigma_total_data)
-        
         # Calculate grain boundary contribution
         gb_contribution = processor.calculate_gb_contribution(
             sigma_total_data, sigma_bulk_data, sigma_gb_data
@@ -1776,11 +1805,6 @@ def process_conductivity_data(df):
                 'atmosphere': atmosphere,
                 'humidity': humidity,
                 'doi': doi,
-                'Ea_table': Ea_table,
-                'Ea_calculated': arrhenius['Ea'],
-                'Ea_calculated_kJ': arrhenius['Ea_kJ'],
-                'arrhenius_R2': arrhenius['R2'],
-                'arrhenius_n_points': arrhenius.get('n_points', 0),
                 'temperature_C': sigma_data['temperature_C'],
                 'temperature_K': sigma_data['temperature_K'],
                 'sigma_total_mS': sigma_data.get('sigma_total_mS'),
@@ -1876,10 +1900,6 @@ def process_conductivity_data(df):
                 'atmosphere': first_row.get('atmosphere'),
                 'humidity': first_row.get('humidity'),
                 'doi': first_row.get('doi'),
-                'Ea_table': first_row.get('Ea_table'),
-                'Ea_calculated': first_row.get('Ea_calculated'),
-                'Ea_calculated_kJ': first_row.get('Ea_calculated_kJ'),
-                'arrhenius_R2': first_row.get('arrhenius_R2'),
                 'r_avg_B': first_row.get('r_avg_B'),
                 'radius_mismatch': first_row.get('radius_mismatch'),
                 'tolerance_factor': first_row.get('tolerance_factor'),
@@ -1909,7 +1929,127 @@ def process_conductivity_data(df):
 
 
 # ============================================================================
-# PLOTTING FUNCTIONS (all original plots preserved, new ones added)
+# CACHED ML FUNCTIONS
+# ============================================================================
+@st.cache_data(ttl=3600, show_spinner="Computing feature importance...")
+def compute_feature_importance(_df_long, selected_features, target, temperature):
+    """
+    Compute feature importance with caching.
+    """
+    plot_df = _df_long[_df_long['temperature_C'] == temperature].copy()
+    
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
+    
+    available_features = [f for f in selected_features if f in plot_df.columns]
+    
+    if len(available_features) < 2:
+        return None, None
+    
+    plot_df = plot_df.dropna(subset=[target] + available_features)
+    
+    if len(plot_df) < 10:
+        return None, None
+    
+    X = plot_df[available_features].copy()
+    
+    if 'additive_type' in plot_df.columns:
+        X = pd.concat([X, pd.get_dummies(plot_df['additive_type'], prefix='additive')], axis=1)
+    
+    y = plot_df[target]
+    
+    rf = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    rf.fit(X, y)
+    
+    importance_df = pd.DataFrame({
+        'feature': X.columns,
+        'importance': rf.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    r2 = rf.score(X, y)
+    
+    return importance_df, r2
+
+
+@st.cache_data(ttl=3600, show_spinner="Comparing ML models...")
+def compare_ml_models(_df_long, selected_features, target, temperature):
+    """
+    Compare ML models with caching.
+    """
+    plot_df = _df_long[_df_long['temperature_C'] == temperature].copy()
+    
+    if 'is_outlier' in plot_df.columns:
+        plot_df = plot_df[~plot_df['is_outlier']]
+    
+    available_features = [f for f in selected_features if f in plot_df.columns]
+    
+    if len(available_features) < 2:
+        return None, None, None, None
+    
+    plot_df = plot_df.dropna(subset=[target] + available_features)
+    
+    if len(plot_df) < 10:
+        return None, None, None, None
+    
+    X = plot_df[available_features].copy()
+    
+    if 'additive_type' in plot_df.columns:
+        X = pd.concat([X, pd.get_dummies(plot_df['additive_type'], prefix='additive')], axis=1)
+    
+    y = plot_df[target]
+    
+    # Define models
+    models = {
+        'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
+        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
+        'XGBoost': xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
+    }
+    
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    results = []
+    
+    for name, model in models.items():
+        scores = cross_val_score(model, X, y, cv=cv, scoring='r2')
+        mae_scores = -cross_val_score(model, X, y, cv=cv, scoring='neg_mean_absolute_error')
+        
+        model.fit(X, y)
+        train_r2 = model.score(X, y)
+        
+        results.append({
+            'Model': name,
+            'CV R² (mean)': f'{scores.mean():.3f}',
+            'CV R² (std)': f'{scores.std():.3f}',
+            'Train R²': f'{train_r2:.3f}',
+            'CV MAE': f'{mae_scores.mean():.3f}',
+            'CV MAE (std)': f'{mae_scores.std():.3f}'
+        })
+    
+    return pd.DataFrame(results), models, X, y
+
+
+@st.cache_data(ttl=3600, show_spinner="Performing SHAP analysis...")
+def compute_shap_analysis(_df, features, target, temperature, model_type='xgboost'):
+    """
+    Compute SHAP analysis with caching.
+    """
+    df_filtered = _df[_df['temperature_C'] == temperature].copy()
+    
+    if 'is_outlier' in df_filtered.columns:
+        df_filtered = df_filtered[~df_filtered['is_outlier']]
+    
+    return shap_analysis(df_filtered, features, target, model_type)
+
+
+@st.cache_data(ttl=3600, show_spinner="Performing clustering analysis...")
+def compute_clustering(_df_long, feature_columns, eps, min_samples):
+    """
+    Compute clustering with caching.
+    """
+    return cluster_materials_by_properties(_df_long, feature_columns, eps, min_samples)
+
+
+# ============================================================================
+# PLOTTING FUNCTIONS (all original plots preserved)
 # ============================================================================
 
 def plot_conductivity_vs_temperature(df_long, ax, selected_additives=None, selected_b_sites=None, temperature_min=400, temperature_max=700):
@@ -2144,7 +2284,7 @@ def plot_pure_vs_additive_comparison(df_long, ax, temperature=600):
         ax.text(0.5, 0.5, 'No additive data available', ha='center', va='center')
         return ax
     
-    colors = ['#4DAF4A' if imp > 0 else '#E41A1C' for imp in improvement_df['improvement']]
+    colors = ['#10B981' if imp > 0 else '#EF4444' for imp in improvement_df['improvement']]
     bars = ax.barh(range(len(improvement_df)), improvement_df['improvement'], color=colors, edgecolor='black')
     
     ax.set_yticks(range(len(improvement_df)))
@@ -2183,8 +2323,8 @@ def plot_bulk_vs_gb_contribution(df_long, ax, temperature=600):
     x = np.arange(len(additives))
     width = 0.35
     
-    bulk_bars = ax.bar(x - width/2, grouped_bulk.values, width, label='σ bulk', color='#377EB8', edgecolor='black')
-    gb_bars = ax.bar(x + width/2, grouped_gb.values, width, label='σ gb', color='#E41A1C', edgecolor='black')
+    bulk_bars = ax.bar(x - width/2, grouped_bulk.values, width, label='σ bulk', color='#3B82F6', edgecolor='black')
+    gb_bars = ax.bar(x + width/2, grouped_gb.values, width, label='σ gb', color='#EF4444', edgecolor='black')
     
     ax.set_xticks(x)
     ax.set_xticklabels(additives, rotation=45, ha='right')
@@ -2368,42 +2508,8 @@ def plot_conductivity_heatmap(df_wide, ax, temperature=600):
     return ax
 
 
-def plot_activation_energy_comparison(df_long, ax):
-    """Plot 11: Activation energy comparison for different additives"""
-    
-    # Get unique samples with calculated Ea
-    samples = df_long[['sample_id', 'additive_type', 'Ea_calculated']].drop_duplicates().dropna(subset=['Ea_calculated'])
-    
-    # Exclude outliers if flag exists (but Ea is per sample, not per measurement)
-    if len(samples) == 0:
-        ax.text(0.5, 0.5, 'No Ea data available', ha='center', va='center')
-        return ax
-    
-    # Grouping by additives
-    grouped = samples.groupby('additive_type')['Ea_calculated'].agg(['mean', 'std', 'count']).reset_index()
-    grouped = grouped.sort_values('mean', ascending=False)
-    
-    bars = ax.bar(
-        range(len(grouped)),
-        grouped['mean'],
-        yerr=grouped['std'],
-        capsize=5,
-        color=[SINTERING_ADDITIVE_COLORS.get(atype, SINTERING_ADDITIVE_COLORS['default']) for atype in grouped['additive_type']],
-        edgecolor='black',
-        linewidth=0.5
-    )
-    
-    ax.set_xticks(range(len(grouped)))
-    ax.set_xticklabels(grouped['additive_type'], rotation=45, ha='right')
-    ax.set_ylabel('Activation Energy (eV)')
-    ax.set_title('Activation Energy Comparison by Additive Type')
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    return ax
-
-
 def plot_t_sin_influence(df_long, ax, temperature=600):
-    """Plot 12: Influence of sintering temperature on conductivity"""
+    """Plot 11: Influence of sintering temperature on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['T_sin', 'sigma_total_mS'])
@@ -2442,7 +2548,7 @@ def plot_t_sin_influence(df_long, ax, temperature=600):
 
 
 def plot_porosity_influence(df_long, ax, temperature=600):
-    """Plot 13: Influence of porosity on conductivity"""
+    """Plot 12: Influence of porosity on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['porosity', 'sigma_total_mS'])
@@ -2481,7 +2587,7 @@ def plot_porosity_influence(df_long, ax, temperature=600):
 
 
 def plot_tolerance_factor_influence(df_long, ax, temperature=600):
-    """Plot 14: Influence of tolerance factor on conductivity"""
+    """Plot 13: Influence of tolerance factor on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['tolerance_factor', 'sigma_total_mS'])
@@ -2522,7 +2628,7 @@ def plot_tolerance_factor_influence(df_long, ax, temperature=600):
 
 
 def plot_oxygen_vacancy_influence(df_long, ax, temperature=600):
-    """Plot 15: Influence of oxygen vacancy concentration on conductivity"""
+    """Plot 14: Influence of oxygen vacancy concentration on conductivity"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     plot_df = plot_df.dropna(subset=['oxygen_vacancy_conc', 'sigma_total_mS'])
@@ -2561,7 +2667,7 @@ def plot_oxygen_vacancy_influence(df_long, ax, temperature=600):
 
 
 def plot_correlation_matrix_conductivity(df_long, features, temperature=600):
-    """Plot 16: Correlation matrix for conductivity parameters"""
+    """Plot 15: Correlation matrix for conductivity parameters"""
     
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     
@@ -2735,7 +2841,7 @@ def plot_partial_correlations(df_long, features, target, control_vars, ax, tempe
     
     partial_df = partial_df.sort_values('partial_correlation', ascending=False)
     
-    colors = ['#4DAF4A' if corr > 0 else '#E41A1C' for corr in partial_df['partial_correlation']]
+    colors = ['#10B981' if corr > 0 else '#EF4444' for corr in partial_df['partial_correlation']]
     
     bars = ax.barh(range(len(partial_df)), partial_df['partial_correlation'], color=colors, edgecolor='black')
     
@@ -2853,7 +2959,7 @@ def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', a
         fig = ax.figure
     
     # Plot correlation
-    ax.plot(temperatures, correlations, 'o-', color='#377EB8', linewidth=2, markersize=6)
+    ax.plot(temperatures, correlations, 'o-', color='#3B82F6', linewidth=2, markersize=6)
     
     # Add significance indicators
     for i, (T, p_val) in enumerate(zip(temperatures, p_values)):
@@ -2917,6 +3023,77 @@ def plot_enhanced_correlation_matrix(df_long, temperature=600):
                 ha='center', va='center', fontsize=12)
         ax.set_title(f'Correlation Matrix at {temperature}°C')
         return fig
+    
+    # Create correlation matrix
+    corr_matrix = plot_df[all_available].corr(method='pearson')
+    
+    # Create figure with subplots for different parameter groups
+    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+    
+    # Plot 1: Conductivity vs Structural
+    if available_conductivity and available_structural:
+        sub_corr = corr_matrix.loc[available_conductivity, available_structural]
+        im1 = axes[0, 0].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+        axes[0, 0].set_xticks(range(len(available_structural)))
+        axes[0, 0].set_xticklabels(available_structural, rotation=45, ha='right', fontsize=8)
+        axes[0, 0].set_yticks(range(len(available_conductivity)))
+        axes[0, 0].set_yticklabels(available_conductivity, fontsize=8)
+        axes[0, 0].set_title('Conductivity vs Structural Parameters')
+        plt.colorbar(im1, ax=axes[0, 0])
+        
+        # Add values
+        for i in range(len(available_conductivity)):
+            for j in range(len(available_structural)):
+                text = axes[0, 0].text(j, i, f'{sub_corr.values[i, j]:.2f}',
+                                       ha="center", va="center", color="white" if abs(sub_corr.values[i, j]) > 0.5 else "black", fontsize=8)
+    
+    # Plot 2: Conductivity vs Electronic
+    if available_conductivity and available_electronic:
+        sub_corr = corr_matrix.loc[available_conductivity, available_electronic]
+        im2 = axes[0, 1].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+        axes[0, 1].set_xticks(range(len(available_electronic)))
+        axes[0, 1].set_xticklabels(available_electronic, rotation=45, ha='right', fontsize=8)
+        axes[0, 1].set_yticks(range(len(available_conductivity)))
+        axes[0, 1].set_yticklabels(available_conductivity, fontsize=8)
+        axes[0, 1].set_title('Conductivity vs Electronic Parameters')
+        plt.colorbar(im2, ax=axes[0, 1])
+        
+        # Add values
+        for i in range(len(available_conductivity)):
+            for j in range(len(available_electronic)):
+                text = axes[0, 1].text(j, i, f'{sub_corr.values[i, j]:.2f}',
+                                       ha="center", va="center", color="white" if abs(sub_corr.values[i, j]) > 0.5 else "black", fontsize=8)
+    
+    # Plot 3: Conductivity vs Microstructural
+    if available_conductivity and available_micro:
+        sub_corr = corr_matrix.loc[available_conductivity, available_micro]
+        im3 = axes[1, 0].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+        axes[1, 0].set_xticks(range(len(available_micro)))
+        axes[1, 0].set_xticklabels(available_micro, rotation=45, ha='right', fontsize=8)
+        axes[1, 0].set_yticks(range(len(available_conductivity)))
+        axes[1, 0].set_yticklabels(available_conductivity, fontsize=8)
+        axes[1, 0].set_title('Conductivity vs Microstructural Parameters')
+        plt.colorbar(im3, ax=axes[1, 0])
+        
+        # Add values
+        for i in range(len(available_conductivity)):
+            for j in range(len(available_micro)):
+                text = axes[1, 0].text(j, i, f'{sub_corr.values[i, j]:.2f}',
+                                       ha="center", va="center", color="white" if abs(sub_corr.values[i, j]) > 0.5 else "black", fontsize=8)
+    
+    # Plot 4: Full correlation matrix heatmap
+    im4 = axes[1, 1].imshow(corr_matrix.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+    axes[1, 1].set_xticks(range(len(all_available)))
+    axes[1, 1].set_xticklabels(all_available, rotation=90, ha='right', fontsize=8)
+    axes[1, 1].set_yticks(range(len(all_available)))
+    axes[1, 1].set_yticklabels(all_available, fontsize=8)
+    axes[1, 1].set_title('Full Correlation Matrix')
+    plt.colorbar(im4, ax=axes[1, 1])
+    
+    plt.suptitle(f'Enhanced Correlation Analysis at {temperature}°C', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    
+    return fig
 
 
 # ============================================================================
@@ -3512,178 +3689,55 @@ def generate_enhanced_conductivity_insights(df_long):
 
 
 # ============================================================================
-# ML FUNCTIONS FOR CONDUCTIVITY ANALYSIS (ENHANCED with SHAP)
-# ============================================================================
-
-@st.cache_data
-def feature_importance_conductivity(df_long, selected_features=None, target='sigma_total_mS', temperature=600):
-    """
-    Random Forest feature importance analysis for conductivity.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    selected_features : list
-        Features to include
-    target : str
-        Target column
-    temperature : int
-        Temperature in Celsius
-    
-    Returns
-    -------
-    tuple
-        (importance_df, r2) or (None, None) if insufficient data
-    """
-    plot_df = df_long[df_long['temperature_C'] == temperature].copy()
-    
-    # Exclude outliers
-    if 'is_outlier' in plot_df.columns:
-        plot_df = plot_df[~plot_df['is_outlier']]
-    
-    if selected_features is None:
-        selected_features = ['density_percent', 'grain_size_um', 'tolerance_factor', 
-                            'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch']
-    
-    available_features = [f for f in selected_features if f in plot_df.columns]
-    
-    if len(available_features) < 2:
-        return None, None
-    
-    plot_df = plot_df.dropna(subset=[target] + available_features)
-    
-    if len(plot_df) < 10:
-        return None, None
-    
-    X = plot_df[available_features].copy()
-    
-    # Add one-hot encoding for additive type
-    if 'additive_type' in plot_df.columns:
-        X = pd.concat([X, pd.get_dummies(plot_df['additive_type'], prefix='additive')], axis=1)
-    
-    y = plot_df[target]
-    
-    rf = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-    rf.fit(X, y)
-    
-    importance_df = pd.DataFrame({
-        'feature': X.columns,
-        'importance': rf.feature_importances_
-    }).sort_values('importance', ascending=False)
-    
-    r2 = rf.score(X, y)
-    
-    return importance_df, r2
-
-
-@st.cache_data
-def compare_ml_models_conductivity(df_long, selected_features=None, target='sigma_total_mS', temperature=600):
-    """
-    Compare multiple ML models for conductivity prediction.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    selected_features : list
-        Features to include
-    target : str
-        Target column
-    temperature : int
-        Temperature in Celsius
-    
-    Returns
-    -------
-    tuple
-        (results_df, models, X, y) or (None, None, None, None) if insufficient data
-    """
-    plot_df = df_long[df_long['temperature_C'] == temperature].copy()
-    
-    # Exclude outliers
-    if 'is_outlier' in plot_df.columns:
-        plot_df = plot_df[~plot_df['is_outlier']]
-    
-    if selected_features is None:
-        selected_features = ['density_percent', 'grain_size_um', 'tolerance_factor', 
-                            'oxygen_vacancy_conc', 'additive_concentration_wt', 'radius_mismatch']
-    
-    available_features = [f for f in selected_features if f in plot_df.columns]
-    
-    if len(available_features) < 2:
-        return None, None, None, None
-    
-    plot_df = plot_df.dropna(subset=[target] + available_features)
-    
-    if len(plot_df) < 10:
-        return None, None, None, None
-    
-    X = plot_df[available_features].copy()
-    
-    if 'additive_type' in plot_df.columns:
-        X = pd.concat([X, pd.get_dummies(plot_df['additive_type'], prefix='additive')], axis=1)
-    
-    y = plot_df[target]
-    
-    # Define models
-    models = {
-        'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
-        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
-        'XGBoost': xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
-    }
-    
-    cv = KFold(n_splits=5, shuffle=True, random_state=42)
-    results = []
-    
-    for name, model in models.items():
-        scores = cross_val_score(model, X, y, cv=cv, scoring='r2')
-        mae_scores = -cross_val_score(model, X, y, cv=cv, scoring='neg_mean_absolute_error')
-        
-        model.fit(X, y)
-        train_r2 = model.score(X, y)
-        
-        results.append({
-            'Model': name,
-            'CV R² (mean)': f'{scores.mean():.3f}',
-            'CV R² (std)': f'{scores.std():.3f}',
-            'Train R²': f'{train_r2:.3f}',
-            'CV MAE': f'{mae_scores.mean():.3f}',
-            'CV MAE (std)': f'{mae_scores.std():.3f}'
-        })
-    
-    return pd.DataFrame(results), models, X, y
-
-
-# ============================================================================
 # MAIN STREAMLIT APPLICATION
 # ============================================================================
 def main():
     st.set_page_config(
-        page_title="Proton-Conducting Perovskite Analyzer",
+        page_title="SintAddvsCond - Sintering Additives vs Conductivity",
         page_icon="🧪",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
-    st.title("🧪 Proton-Conducting Perovskite: Sintering Additive Analysis")
-    st.markdown("Analyzing the effect of sintering additives (Cu, Ni, Zn, Co) on total, bulk, and grain boundary conductivity")
+    # Apply custom CSS
+    apply_custom_css()
+    
+    # Title with gradient effect
+    st.markdown("""
+    <div style="text-align: center; padding: 20px;">
+        <h1 style="background: linear-gradient(135deg, #3B82F6, #10B981); 
+                   -webkit-background-clip: text; 
+                   -webkit-text-fill-color: transparent;
+                   font-size: 48px;">
+            🧪 SintAddvsCond
+        </h1>
+        <p style="color: #94A3B8; font-size: 18px;">
+            Sintering Additives versus Conductivity Analysis Platform
+        </p>
+        <p style="color: #64748B; font-size: 14px;">
+            Proton-Conducting Perovskites | Bulk & Grain Boundary Analysis | Machine Learning Insights
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown("---")
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Controls")
+        st.markdown("### ⚙️ Controls")
         
         # Debug mode checkbox
         debug_mode = st.checkbox("🔧 Debug Mode", value=False, help="Show debug information about column detection")
         
         # File upload
         uploaded_file = st.file_uploader(
-            "Upload Excel file", 
+            "📁 Upload Excel file", 
             type=['xlsx', 'xls'],
             help="Upload your data file with perovskite compositions and conductivity measurements"
         )
         
         if uploaded_file is None:
-            st.info("Please upload a data file to begin")
+            st.info("👈 Please upload a data file to begin")
             st.markdown("""
             ### Expected format:
             - **A cation**: A-site element (Ba)
@@ -3708,7 +3762,7 @@ def main():
             return
         
         st.markdown("---")
-        st.header("📊 Analysis Settings")
+        st.markdown("### 📊 Analysis Settings")
         
         # Temperature selection for analysis
         temperature_analysis = st.slider(
@@ -3721,9 +3775,9 @@ def main():
         )
         
         st.markdown("---")
-        st.header("🔍 Filters")
+        st.markdown("### 🔍 Filters")
         
-        # ИНИЦИАЛИЗИРУЕМ ПЕРЕМЕННЫЕ ДО TRY (ВАЖНО!)
+        # ИНИЦИАЛИЗИРУЕМ ПЕРЕМЕННЫЕ ДО TRY
         df_long = pd.DataFrame()
         df_wide = pd.DataFrame()
         filtered_long = pd.DataFrame()
@@ -3734,24 +3788,11 @@ def main():
         selected_atmosphere = []
         
         try:
-            # Load file with proper multi-row header handling
-            # Use the new function for multi-row header
-            df = read_excel_with_multirow_header(uploaded_file)
+            # Load and process data with caching
+            with st.spinner("🔄 Loading and processing data..."):
+                df_long, df_wide = load_and_process_data(uploaded_file)
             
-            if debug_mode:
-                st.expander("🔍 Debug: Found Columns").write(list(df.columns))
-                st.expander("🔍 Debug: Bulk columns").write([c for c in df.columns if 'bulk' in str(c).lower()])
-                st.expander("🔍 Debug: GB columns").write([c for c in df.columns if 'gb' in str(c).lower() or 'grain' in str(c).lower()])
-                st.expander("🔍 Debug: Total columns").write([c for c in df.columns if 'total' in str(c).lower() or 'σ total' in str(c)])
-                st.expander("🔍 Debug: Data sample").write(df.head(3))
-            
-            st.success(f"✅ File loaded: {len(df)} rows")
-            
-            # Process data
-            with st.spinner("🔄 Processing conductivity data... Please wait."):
-                df_long, df_wide = process_conductivity_data(df)
-            
-            st.success(f"✅ Processed: {len(df_long)} measurements")
+            st.success(f"✅ Data loaded: {len(df_long)} measurements, {df_long['sample_id'].nunique() if 'sample_id' in df_long.columns else 0} unique samples")
             
             # Create filters in sidebar
             if 'additive_type' in df_long.columns:
@@ -3802,7 +3843,7 @@ def main():
             
         except Exception as e:
             st.error(f"Error loading file: {str(e)}")
-            st.exception(e)  # Показывает полную ошибку для отладки
+            st.exception(e)
             return
     
     # ============================================================================
@@ -3863,46 +3904,52 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_conductivity_vs_temperature(filtered_long, ax, selected_additives, selected_b_sites, 200, 900)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating conductivity plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_conductivity_vs_temperature(filtered_long, ax, selected_additives, selected_b_sites, 200, 900)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_arrhenius(filtered_long, ax, selected_additives, selected_b_sites)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating Arrhenius plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_arrhenius(filtered_long, ax, selected_additives, selected_b_sites)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             st.subheader(f"Conductivity at {temperature_analysis}°C")
             
             col1, col2 = st.columns(2)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_additive_comparison_bar(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating comparison bar chart..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_additive_comparison_bar(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_pure_vs_additive_comparison(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating improvement chart..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_pure_vs_additive_comparison(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             # Enhanced correlation matrix
             st.subheader("Enhanced Correlation Matrix")
-            fig = plot_enhanced_correlation_matrix(filtered_long, temperature_analysis)
-            if fig:
-                st.pyplot(fig)
-                plt.close(fig)
+            with st.spinner("Generating correlation matrix..."):
+                fig = plot_enhanced_correlation_matrix(filtered_long, temperature_analysis)
+                if fig:
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             # Heatmap
             if len(filtered_wide) > 0:
-                fig, ax = plt.subplots(figsize=(10, 6))
-                plot_conductivity_heatmap(filtered_wide, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating heatmap..."):
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    plot_conductivity_heatmap(filtered_wide, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
         
         # ====================================================================
         # TAB 2: ADDITIVE ANALYSIS
@@ -3913,23 +3960,22 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_conductivity_vs_additive_concentration(filtered_long, ax, temperature_analysis, selected_b_sites)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating concentration plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_conductivity_vs_additive_concentration(filtered_long, ax, temperature_analysis, selected_b_sites)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_activation_energy_comparison(filtered_long, ax)
-                st.pyplot(fig)
-                plt.close(fig)
+                st.info("Activation energy analysis has been removed as requested.")
             
             st.subheader("Influence of Sintering Temperature")
             
-            fig, ax = plt.subplots(figsize=(10, 6))
-            plot_t_sin_influence(filtered_long, ax, temperature_analysis)
-            st.pyplot(fig)
-            plt.close(fig)
+            with st.spinner("Generating sintering temperature plot..."):
+                fig, ax = plt.subplots(figsize=(10, 6))
+                plot_t_sin_influence(filtered_long, ax, temperature_analysis)
+                st.pyplot(fig)
+                plt.close(fig)
         
         # ====================================================================
         # TAB 3: BULK VS GB ANALYSIS
@@ -3940,16 +3986,18 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_bulk_vs_gb_contribution(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating bulk vs GB plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_bulk_vs_gb_contribution(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_gb_resistance_fraction(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating GB fraction plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_gb_resistance_fraction(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             # Verification of mixing rule
             st.subheader("Verification of the Mixing Rule")
@@ -3966,7 +4014,7 @@ def main():
                 
                 fig, ax = plt.subplots(figsize=(8, 6))
                 ax.scatter(df_check['sigma_total_mS'], df_check['sigma_total_calc'], 
-                          c='blue', s=80, alpha=0.7, edgecolors='black')
+                          c='#3B82F6', s=80, alpha=0.7, edgecolors='black')
                 
                 min_val = min(df_check['sigma_total_mS'].min(), df_check['sigma_total_calc'].min())
                 max_val = max(df_check['sigma_total_mS'].max(), df_check['sigma_total_calc'].max())
@@ -3994,21 +4042,24 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_conductivity_vs_grain_size(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating grain size plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_conductivity_vs_grain_size(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_conductivity_vs_density(filtered_long, ax, temperature_analysis)
+                with st.spinner("Generating density plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_conductivity_vs_density(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
+            
+            with st.spinner("Generating porosity plot..."):
+                fig, ax = plt.subplots(figsize=(10, 6))
+                plot_porosity_influence(filtered_long, ax, temperature_analysis)
                 st.pyplot(fig)
                 plt.close(fig)
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            plot_porosity_influence(filtered_long, ax, temperature_analysis)
-            st.pyplot(fig)
-            plt.close(fig)
         
         # ====================================================================
         # TAB 5: COMPOSITIONAL EFFECTS
@@ -4019,24 +4070,27 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_tolerance_factor_influence(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating tolerance factor plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_tolerance_factor_influence(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_oxygen_vacancy_influence(filtered_long, ax, temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating oxygen vacancy plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_oxygen_vacancy_influence(filtered_long, ax, temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             
             # Radius mismatch effect
             st.subheader("B-site Radius Mismatch Effect")
             if 'radius_mismatch' in filtered_long.columns:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                plot_polynomial_fit(filtered_long, 'radius_mismatch', 'sigma_total_mS', ax, degree=2, temperature=temperature_analysis)
-                st.pyplot(fig)
-                plt.close(fig)
+                with st.spinner("Generating radius mismatch plot..."):
+                    fig, ax = plt.subplots(figsize=(8, 6))
+                    plot_polynomial_fit(filtered_long, 'radius_mismatch', 'sigma_total_mS', ax, degree=2, temperature=temperature_analysis)
+                    st.pyplot(fig)
+                    plt.close(fig)
             else:
                 st.info("Radius mismatch data not available")
         
@@ -4062,15 +4116,16 @@ def main():
                 
                 with col1:
                     st.markdown("**Feature Importance (Random Forest)**")
-                    importance_df, r2 = feature_importance_conductivity(
-                        filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
-                    )
+                    with st.spinner("Computing feature importance..."):
+                        importance_df, r2 = compute_feature_importance(
+                            filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
+                        )
                     
                     if importance_df is not None:
                         fig, ax = plt.subplots(figsize=(8, 6))
                         importance_df = importance_df.head(10)
                         ax.barh(range(len(importance_df)), importance_df['importance'], 
-                               color='steelblue', edgecolor='black')
+                               color='#3B82F6', edgecolor='black')
                         ax.set_yticks(range(len(importance_df)))
                         ax.set_yticklabels(importance_df['feature'])
                         ax.set_xlabel('Feature Importance')
@@ -4085,9 +4140,10 @@ def main():
                 
                 with col2:
                     st.markdown("**Model Comparison**")
-                    models_df, models, X, y = compare_ml_models_conductivity(
-                        filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
-                    )
+                    with st.spinner("Comparing ML models..."):
+                        models_df, models, X, y = compare_ml_models(
+                            filtered_long, ml_features, 'sigma_total_mS', temperature_analysis
+                        )
                     
                     if models_df is not None:
                         st.dataframe(models_df, use_container_width=True)
@@ -4098,10 +4154,10 @@ def main():
                 st.subheader("🔬 SHAP Analysis (Model Interpretability)")
                 
                 if len(ml_features) >= 2 and models_df is not None:
-                    shap_result = shap_analysis(
-                        filtered_long[filtered_long['temperature_C'] == temperature_analysis],
-                        ml_features, 'sigma_total_mS', model_type='xgboost'
-                    )
+                    with st.spinner("Performing SHAP analysis..."):
+                        shap_result = compute_shap_analysis(
+                            filtered_long, ml_features, 'sigma_total_mS', temperature_analysis, model_type='xgboost'
+                        )
                     
                     if shap_result is not None:
                         col1, col2 = st.columns(2)
@@ -4127,7 +4183,7 @@ def main():
                                 X_data = shap_result['X']
                                 
                                 ax.scatter(X_data[:, idx], shap_values[:, idx], 
-                                          c='steelblue', alpha=0.6, edgecolors='black')
+                                          c='#3B82F6', alpha=0.6, edgecolors='black')
                                 ax.set_xlabel(feature_for_dependence)
                                 ax.set_ylabel('SHAP value')
                                 ax.set_title(f'SHAP Dependence: {feature_for_dependence}')
@@ -4166,11 +4222,12 @@ def main():
                                             'additive_concentration_wt', 'radius_mismatch'] if f in filtered_long.columns]
                     
                     if len(features_for_partial) > 0:
-                        fig, ax = plt.subplots(figsize=(10, 6))
-                        plot_partial_correlations(filtered_long, features_for_partial, 'sigma_total_mS', 
-                                                 control_vars, ax, temperature_analysis)
-                        st.pyplot(fig)
-                        plt.close(fig)
+                        with st.spinner("Computing partial correlations..."):
+                            fig, ax = plt.subplots(figsize=(10, 6))
+                            plot_partial_correlations(filtered_long, features_for_partial, 'sigma_total_mS', 
+                                                     control_vars, ax, temperature_analysis)
+                            st.pyplot(fig)
+                            plt.close(fig)
                     else:
                         st.warning("No features available for partial correlation analysis")
                 else:
@@ -4192,9 +4249,10 @@ def main():
                 )
                 
                 if temp_corr_feature:
-                    fig = plot_correlation_by_temperature(filtered_long, temp_corr_feature, 'sigma_total_mS')
-                    st.pyplot(fig)
-                    plt.close(fig)
+                    with st.spinner("Computing temperature-dependent correlation..."):
+                        fig = plot_correlation_by_temperature(filtered_long, temp_corr_feature, 'sigma_total_mS')
+                        st.pyplot(fig)
+                        plt.close(fig)
             else:
                 st.info("No features available for temperature-dependent correlation")
             
@@ -4217,10 +4275,11 @@ def main():
                     poly_degree = st.slider("Polynomial degree", min_value=2, max_value=4, value=2)
                 
                 if poly_feature:
-                    fig, ax = plt.subplots(figsize=(8, 6))
-                    plot_polynomial_fit(filtered_long, poly_feature, 'sigma_total_mS', ax, degree=poly_degree, temperature=temperature_analysis)
-                    st.pyplot(fig)
-                    plt.close(fig)
+                    with st.spinner("Fitting polynomial regression..."):
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        plot_polynomial_fit(filtered_long, poly_feature, 'sigma_total_mS', ax, degree=poly_degree, temperature=temperature_analysis)
+                        st.pyplot(fig)
+                        plt.close(fig)
             else:
                 st.info("No features available for polynomial regression")
             
@@ -4246,17 +4305,18 @@ def main():
                     with col2:
                         min_samples = st.slider("DBSCAN min_samples", min_value=2, max_value=10, value=3)
                     
-                    fig, ax = plt.subplots(figsize=(10, 8))
-                    plot_clustering_results(filtered_long, cluster_features, ax, eps=eps, min_samples=min_samples)
-                    st.pyplot(fig)
-                    plt.close(fig)
+                    with st.spinner("Performing clustering analysis..."):
+                        fig, ax = plt.subplots(figsize=(10, 8))
+                        plot_clustering_results(filtered_long, cluster_features, ax, eps=eps, min_samples=min_samples)
+                        st.pyplot(fig)
+                        plt.close(fig)
                 else:
                     st.info("Select at least 2 features for clustering analysis")
             else:
                 st.info("Need at least 2 features for clustering analysis")
         
         # ====================================================================
-        # TAB 8: BUBBLE ANALYSIS (NEW)
+        # TAB 8: BUBBLE ANALYSIS
         # ====================================================================
         with tab8:
             st.subheader("🎯 Bubble Diagram Analysis")
@@ -4287,65 +4347,67 @@ def main():
                 )
             
             # Create bubble diagram
-            if bubble_x == 'additive_concentration_wt':
-                fig = plot_bubble_diagram_conductivity_vs_additive(
-                    filtered_long, temperature_analysis, bubble_x, bubble_size, bubble_color
-                )
-            elif bubble_x == 'tolerance_factor':
-                fig = plot_bubble_diagram_conductivity_vs_tolerance(
-                    filtered_long, temperature_analysis, bubble_size, bubble_color
-                )
-            else:
-                # Generic bubble diagram
-                plot_df = filtered_long[filtered_long['temperature_C'] == temperature_analysis].copy()
-                if 'is_outlier' in plot_df.columns:
-                    plot_df = plot_df[~plot_df['is_outlier']]
-                
-                fig, ax = plt.subplots(figsize=(12, 8))
-                
-                if bubble_size in plot_df.columns and plot_df[bubble_size].notna().any():
-                    size_min = plot_df[bubble_size].min()
-                    size_max = plot_df[bubble_size].max()
-                    if size_max > size_min:
-                        sizes = 50 + (plot_df[bubble_size] - size_min) / (size_max - size_min) * 300
+            with st.spinner("Generating bubble diagram..."):
+                if bubble_x == 'additive_concentration_wt':
+                    fig = plot_bubble_diagram_conductivity_vs_additive(
+                        filtered_long, temperature_analysis, bubble_x, bubble_size, bubble_color
+                    )
+                elif bubble_x == 'tolerance_factor':
+                    fig = plot_bubble_diagram_conductivity_vs_tolerance(
+                        filtered_long, temperature_analysis, bubble_size, bubble_color
+                    )
+                else:
+                    # Generic bubble diagram
+                    plot_df = filtered_long[filtered_long['temperature_C'] == temperature_analysis].copy()
+                    if 'is_outlier' in plot_df.columns:
+                        plot_df = plot_df[~plot_df['is_outlier']]
+                    
+                    fig, ax = plt.subplots(figsize=(12, 8))
+                    
+                    if bubble_size in plot_df.columns and plot_df[bubble_size].notna().any():
+                        size_min = plot_df[bubble_size].min()
+                        size_max = plot_df[bubble_size].max()
+                        if size_max > size_min:
+                            sizes = 50 + (plot_df[bubble_size] - size_min) / (size_max - size_min) * 300
+                        else:
+                            sizes = 100
                     else:
                         sizes = 100
-                else:
-                    sizes = 100
+                    
+                    if bubble_color in plot_df.columns and plot_df[bubble_color].notna().any():
+                        scatter = ax.scatter(plot_df[bubble_x], plot_df['sigma_total_mS'],
+                                            s=sizes, c=plot_df[bubble_color],
+                                            cmap='plasma', alpha=0.7,
+                                            edgecolors='black', linewidth=0.5)
+                        cbar = plt.colorbar(scatter, ax=ax)
+                        cbar.set_label(bubble_color.replace('_', ' ').title())
+                    else:
+                        for additive in plot_df['additive_type'].unique():
+                            subset = plot_df[plot_df['additive_type'] == additive]
+                            color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
+                            ax.scatter(subset[bubble_x], subset['sigma_total_mS'],
+                                      s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                                      c=[color], label=additive, alpha=0.7,
+                                      edgecolors='black', linewidth=0.5)
+                        ax.legend()
+                    
+                    ax.set_xlabel(bubble_x.replace('_', ' ').title())
+                    ax.set_ylabel(f'σ total at {temperature_analysis}°C (mS/cm)')
+                    ax.set_title(f'Bubble Diagram: {bubble_x.replace("_", " ").title()} vs Conductivity')
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
                 
-                if bubble_color in plot_df.columns and plot_df[bubble_color].notna().any():
-                    scatter = ax.scatter(plot_df[bubble_x], plot_df['sigma_total_mS'],
-                                        s=sizes, c=plot_df[bubble_color],
-                                        cmap='plasma', alpha=0.7,
-                                        edgecolors='black', linewidth=0.5)
-                    cbar = plt.colorbar(scatter, ax=ax)
-                    cbar.set_label(bubble_color.replace('_', ' ').title())
-                else:
-                    for additive in plot_df['additive_type'].unique():
-                        subset = plot_df[plot_df['additive_type'] == additive]
-                        color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-                        ax.scatter(subset[bubble_x], subset['sigma_total_mS'],
-                                  s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
-                                  c=[color], label=additive, alpha=0.7,
-                                  edgecolors='black', linewidth=0.5)
-                    ax.legend()
-                
-                ax.set_xlabel(bubble_x.replace('_', ' ').title())
-                ax.set_ylabel(f'σ total at {temperature_analysis}°C (mS/cm)')
-                ax.set_title(f'Bubble Diagram: {bubble_x.replace("_", " ").title()} vs Conductivity')
-                ax.grid(True, alpha=0.3)
-                plt.tight_layout()
-            
-            st.pyplot(fig)
-            plt.close(fig)
+                st.pyplot(fig)
+                plt.close(fig)
             
             # Multi-panel bubble analysis
             st.subheader("Multi-Panel Bubble Analysis")
             st.markdown("Comprehensive view of sintering additive effects across multiple dimensions.")
             
-            fig = plot_multi_panel_bubble_analysis(filtered_long, temperature_analysis)
-            st.pyplot(fig)
-            plt.close(fig)
+            with st.spinner("Generating multi-panel bubble analysis..."):
+                fig = plot_multi_panel_bubble_analysis(filtered_long, temperature_analysis)
+                st.pyplot(fig)
+                plt.close(fig)
         
         # ====================================================================
         # TAB 9: INSIGHTS & DATA
@@ -4353,9 +4415,10 @@ def main():
         with tab9:
             st.subheader("💡 Automated Physical Insights")
             
-            insights = generate_enhanced_conductivity_insights(filtered_long)
-            for insight in insights:
-                st.info(insight)
+            with st.spinner("Generating insights from data..."):
+                insights = generate_enhanced_conductivity_insights(filtered_long)
+                for insight in insights:
+                    st.info(insight)
             
             st.markdown("---")
             st.subheader("📋 Processed Data")
@@ -4365,7 +4428,7 @@ def main():
                            'additive_concentration_wt', 'additive_incorporation_likely',
                            'temperature_C', 'sigma_total_mS', 'sigma_bulk_mS', 'sigma_gb_mS',
                            'density_percent', 'grain_size_um', 'tolerance_factor', 
-                           'radius_mismatch', 'oxygen_vacancy_conc', 'Ea_calculated', 'is_outlier']
+                           'radius_mismatch', 'oxygen_vacancy_conc', 'is_outlier']
             available_cols = [col for col in display_cols if col in filtered_long.columns]
             
             st.dataframe(filtered_long[available_cols].head(100), use_container_width=True)
@@ -4373,7 +4436,7 @@ def main():
             # Export data
             csv = filtered_long.to_csv(index=False).encode('utf-8')
             st.download_button(
-                "Download processed data as CSV",
+                "📥 Download processed data as CSV",
                 csv,
                 "conductivity_data_processed.csv",
                 "text/csv"
@@ -4396,7 +4459,7 @@ def main():
             'T sin': [1550, 1550, 1450],
             'ρ, %': ['', '', 95.7],
             'd, mkm': ['', '', 15.3],
-            'σ total, mS 600': [3.41, 7.40, 12.76],
+            'σ total, 600': [3.41, 7.40, 12.76],
             'Атмосфера': ['Ox', 'Ox', 'Ox'],
             'Влажность': ['wet', 'wet', 'dry'],
             'ссылка': ['10.1016/j.ceramint.2022.01.039', 
@@ -4407,11 +4470,11 @@ def main():
         st.dataframe(example_data, use_container_width=True)
         
         st.markdown("""
-        ### Key Features of This Analyzer:
+        ### Key Features of SintAddvsCond:
         
         #### 🔬 **Conductivity Analysis**
         - Temperature-dependent conductivity (200-900°C)
-        - Arrhenius plots and activation energy calculation
+        - Arrhenius plots for activation energy analysis
         - Comparison of different sintering additives
         
         #### ⚡ **Bulk vs Grain Boundary**
@@ -4430,114 +4493,22 @@ def main():
         - Additive concentration optimization
         - B-site radius mismatch analysis
         
-        #### 🎯 **New in This Version**
-        - Enhanced correlation matrix with grouped parameters
-        - Bubble diagrams for multi-parameter visualization
-        - Conductivity extrapolation to higher temperatures
-        - Improved activation energy calculation
-        - Debug mode for troubleshooting
+        #### 🎯 **Advanced Features**
+        - Machine Learning for feature importance
+        - SHAP analysis for model interpretability
+        - Partial correlation analysis
+        - DBSCAN clustering for material classification
+        - Multi-parameter bubble diagrams
         """)
+    
+    # Footer
+    st.markdown("""
+    <div class="footer">
+        <p>SintAddvsCond - Sintering Additives versus Conductivity Analysis Platform</p>
+        <p>© 2024 | Powered by Streamlit, Scikit-learn, and SHAP</p>
+    </div>
+    """, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
-
-
-# ============================================================================
-# UNIT TESTS (for development and debugging)
-# ============================================================================
-
-# Unit tests for key functions
-import sys
-
-def test_safe_float_converter():
-    """Test safe_float_converter function"""
-    assert safe_float_converter(123) == 123.0
-    assert safe_float_converter("123") == 123.0
-    assert safe_float_converter("123.45") == 123.45
-    assert safe_float_converter("123,45") == 123.45
-    assert safe_float_converter("123%") == 123.0
-    assert safe_float_converter("") is None
-    assert safe_float_converter(None) is None
-    assert safe_float_converter("abc") is None
-    print("✓ test_safe_float_converter passed")
-
-def test_flexible_column_mapper():
-    """Test FlexibleColumnMapper"""
-    mapper = FlexibleColumnMapper()
-    
-    # Test pattern matching
-    assert any(re.search(pattern, "σ total, mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
-    assert any(re.search(pattern, "sigma_total_mS", re.IGNORECASE) for pattern in mapper.patterns['sigma_total'])
-    assert any(re.search(pattern, "σ bulk", re.IGNORECASE) for pattern in mapper.patterns['sigma_bulk'])
-    assert any(re.search(pattern, "σ gb", re.IGNORECASE) for pattern in mapper.patterns['sigma_gb'])
-    
-    print("✓ test_flexible_column_mapper passed")
-
-def test_polynomial_regression():
-    """Test polynomial_regression_analysis"""
-    # Create synthetic data
-    np.random.seed(42)
-    x = np.linspace(0, 1, 20)
-    y = x**2 + 0.1 * np.random.randn(20)
-    df = pd.DataFrame({'x': x, 'y': y})
-    
-    result = polynomial_regression_analysis(df, 'x', 'y', degree=2)
-    
-    assert result['model'] is not None
-    assert result['r2'] is not None
-    assert result['r2'] > 0.8  # Should fit well
-    assert len(result['x_pred']) == 100
-    assert len(result['y_pred']) == 100
-    
-    print("✓ test_polynomial_regression passed")
-
-def test_partial_correlation():
-    """Test partial_correlation_analysis"""
-    np.random.seed(42)
-    n = 50
-    data = {
-        'target': np.random.randn(n),
-        'feature1': np.random.randn(n),
-        'feature2': np.random.randn(n),
-        'control': np.random.randn(n)
-    }
-    df = pd.DataFrame(data)
-    
-    result = partial_correlation_analysis(df, 'target', ['feature1', 'feature2'], ['control'])
-    
-    assert len(result) == 2
-    assert 'partial_correlation' in result.columns
-    assert 'p_value' in result.columns
-    
-    print("✓ test_partial_correlation passed")
-
-def test_extrapolate_conductivity():
-    """Test extrapolate_conductivity function"""
-    # Create synthetic conductivity data
-    sigma_data = [
-        {'temperature_K': 473.15, 'temperature_C': 200, 'sigma_total_mS': 0.1},
-        {'temperature_K': 573.15, 'temperature_C': 300, 'sigma_total_mS': 0.5},
-        {'temperature_K': 673.15, 'temperature_C': 400, 'sigma_total_mS': 2.0},
-        {'temperature_K': 773.15, 'temperature_C': 500, 'sigma_total_mS': 5.0}
-    ]
-    
-    result = extrapolate_conductivity(sigma_data, 600)
-    
-    # Result should be positive and reasonable
-    if result is not None:
-        assert result > 0
-        assert result < 100  # Sanity check
-    
-    print("✓ test_extrapolate_conductivity passed")
-
-# Run tests
-print("\n=== Running Unit Tests ===\n")
-try:
-    test_safe_float_converter()
-    test_flexible_column_mapper()
-    test_polynomial_regression()
-    test_partial_correlation()
-    test_extrapolate_conductivity()
-    print("\n✅ All tests passed!")
-except Exception as e:
-    print(f"\n❌ Test failed: {e}")
