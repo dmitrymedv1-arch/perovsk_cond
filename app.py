@@ -42,32 +42,27 @@ def apply_custom_css():
     <style>
     /* Main container styling */
     .main {
-        background-color: #0F172A;
+        background-color: #FFFFFF;
     }
     
     /* Block container styling */
     .stApp {
-        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+        background: linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
     }
     
     /* Metric cards */
     .stMetric {
-        background: #1E293B;
+        background: #FFFFFF;
         border-radius: 12px;
         padding: 12px;
-        border: 1px solid #334155;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
         transition: transform 0.2s;
-    }
-    
-    .stMetric:hover {
-        transform: translateY(-2px);
-        border-color: #3B82F6;
     }
     
     /* Headers */
     h1, h2, h3, h4, h5, h6 {
-        color: #F1F5F9 !important;
+        color: #1E293B !important;
         font-weight: 600 !important;
     }
     
@@ -84,31 +79,14 @@ def apply_custom_css():
     }
     
     h3 {
-        color: #94A3B8 !important;
-    }
-    
-    /* Buttons */
-    .stButton button {
-        background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        padding: 8px 16px;
-        font-weight: 500;
-        transition: all 0.3s;
-    }
-    
-    .stButton button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+        color: #475569 !important;
     }
     
     /* DataFrames */
     .stDataFrame {
         border-radius: 12px;
-        border: 1px solid #334155;
-        background: #1E293B;
+        border: 1px solid #E2E8F0;
+        background: #FFFFFF;
     }
     
     /* Info/Warning/Success boxes */
@@ -118,33 +96,33 @@ def apply_custom_css():
     }
     
     .stAlert[data-baseweb="notification"] {
-        background-color: #1E293B;
+        background-color: #F8FAFC;
     }
     
     /* Select boxes */
     .stSelectbox label, .stMultiSelect label {
-        color: #94A3B8 !important;
+        color: #475569 !important;
         font-weight: 500 !important;
     }
     
     /* Sliders */
     .stSlider label {
-        color: #94A3B8 !important;
+        color: #475569 !important;
     }
     
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
-        background-color: #1E293B;
+        background-color: #F1F5F9;
         border-radius: 12px;
         padding: 8px;
     }
     
     .stTabs [data-baseweb="tab"] {
-        background-color: #334155;
+        background-color: #E2E8F0;
         border-radius: 8px;
         padding: 8px 16px;
-        color: #94A3B8;
+        color: #475569;
         font-weight: 500;
         transition: all 0.2s;
     }
@@ -156,59 +134,34 @@ def apply_custom_css():
     
     /* Expanders */
     .streamlit-expanderHeader {
-        background-color: #1E293B;
+        background-color: #F8FAFC;
         border-radius: 8px;
-        color: #F1F5F9;
+        color: #1E293B;
         font-weight: 500;
-    }
-    
-    /* Progress bars */
-    .stProgress > div > div {
-        background-color: #3B82F6;
-    }
-    
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: #1E293B;
-        border-radius: 4px;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: #3B82F6;
-        border-radius: 4px;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: #2563EB;
     }
     
     /* Plot containers */
     .plot-container {
-        background: #1E293B;
+        background: #FFFFFF;
         border-radius: 12px;
         padding: 16px;
-        border: 1px solid #334155;
+        border: 1px solid #E2E8F0;
         margin: 16px 0;
     }
     
     /* Sidebar */
     .css-1d391kg, .css-12ttj6m {
-        background-color: #0F172A;
-        border-right: 1px solid #334155;
+        background-color: #F8FAFC;
+        border-right: 1px solid #E2E8F0;
     }
     
     /* Footer */
     .footer {
         text-align: center;
         padding: 20px;
-        color: #64748B;
+        color: #94A3B8;
         font-size: 12px;
-        border-top: 1px solid #334155;
+        border-top: 1px solid #E2E8F0;
         margin-top: 40px;
     }
     </style>
@@ -230,7 +183,7 @@ plt.rcParams.update({
     'axes.labelweight': 'bold',
     'axes.titlesize': 12,
     'axes.titleweight': 'bold',
-    'axes.facecolor': '#1E293B',
+    'axes.facecolor': '#FFFFFF',
     'axes.edgecolor': '#334155',
     'axes.linewidth': 1.0,
     'axes.grid': False,
@@ -255,9 +208,9 @@ plt.rcParams.update({
     'savefig.dpi': 600,
     'savefig.bbox': 'tight',
     'savefig.pad_inches': 0.1,
-    'figure.facecolor': '#0F172A',
-    'axes.labelcolor': '#F1F5F9',
-    'text.color': '#F1F5F9',
+    'figure.facecolor': '#FFFFFF',
+    'axes.labelcolor': '#1F2937',
+    'text.color': '#1F2937',
     'lines.linewidth': 1.5,
     'lines.markersize': 6,
     'errorbar.capsize': 3,
