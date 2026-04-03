@@ -2758,19 +2758,6 @@ def plot_partial_correlations(df_long, features, target, control_vars, ax, tempe
 def plot_clustering_results(df_long, feature_columns, ax, eps=0.5, min_samples=3):
     """
     Plot clustering results using PCA for visualization.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    feature_columns : list
-        Features to use for clustering
-    ax : matplotlib.axes.Axes
-        Axes to plot on
-    eps : float
-        DBSCAN epsilon
-    min_samples : int
-        DBSCAN min_samples
     """
     # Aggregate by sample
     agg_df = df_long.groupby('sample_id')[feature_columns].mean().dropna()
@@ -2793,23 +2780,28 @@ def plot_clustering_results(df_long, feature_columns, ax, eps=0.5, min_samples=3
     
     # Get additive types for coloring
     additive_map = df_long.groupby('sample_id')['additive_type'].first()
-    additive_colors = [SINTERING_ADDITIVE_COLORS.get(additive_map.get(idx, 'Pure'), SINTERING_ADDITIVE_COLORS['default']) 
-                      for idx in agg_df.index]
     
-    scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1], c=clusters, cmap='viridis', s=100, alpha=0.7, edgecolors='black')
-    
-    # Add labels for each point
-    for i, idx in enumerate(agg_df.index):
-        additive = additive_map.get(idx, '')
-        ax.annotate(f'{additive}', (X_pca[i, 0], X_pca[i, 1]), fontsize=8, alpha=0.7)
-    
-    ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
-    ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
-    ax.set_title(f'DBSCAN Clustering (eps={eps}, min_samples={min_samples})')
-    
-    # Add colorbar for clusters
-    cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label('Cluster')
+    # Create scatter plot - FIXED: use c=clusters with proper handling
+    # Check if we have valid data
+    if len(X_pca) > 0 and X_pca.shape[1] >= 2:
+        scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1], c=clusters, cmap='viridis', 
+                            s=100, alpha=0.7, edgecolors='black')
+        
+        # Add labels for each point
+        for i, idx in enumerate(agg_df.index):
+            additive = additive_map.get(idx, '')
+            ax.annotate(f'{additive}', (X_pca[i, 0], X_pca[i, 1]), fontsize=8, alpha=0.7)
+        
+        ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
+        ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
+        ax.set_title(f'DBSCAN Clustering (eps={eps}, min_samples={min_samples})')
+        
+        # Add colorbar for clusters - только если есть больше одного кластера
+        if len(np.unique(clusters)) > 1:
+            cbar = plt.colorbar(scatter, ax=ax)
+            cbar.set_label('Cluster')
+    else:
+        ax.text(0.5, 0.5, 'Invalid PCA transformation', ha='center', va='center')
     
     return ax
 
@@ -2888,23 +2880,6 @@ def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', a
 def plot_enhanced_correlation_matrix(df_long, temperature=600):
     """
     Enhanced correlation matrix with separation of conductivity types.
-    
-    This function creates a correlation matrix that includes:
-    - Total, bulk, and grain boundary conductivity
-    - Crystallochemical factors (tolerance factor, radius mismatch, etc.)
-    - Microstructural factors (density, grain size, porosity)
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    temperature : int
-        Temperature in Celsius
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with correlation matrix
     """
     # Prepare data for specified temperature
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
@@ -2912,6 +2887,14 @@ def plot_enhanced_correlation_matrix(df_long, temperature=600):
     # Exclude outliers
     if 'is_outlier' in plot_df.columns:
         plot_df = plot_df[~plot_df['is_outlier']]
+    
+    # FIXED: Check if DataFrame is empty after filtering
+    if len(plot_df) == 0:
+        fig, ax = plt.subplots(figsize=(12, 10))
+        ax.text(0.5, 0.5, f'No data available at {temperature}°C', 
+                ha='center', va='center', fontsize=14)
+        ax.set_title(f'Correlation Matrix at {temperature}°C')
+        return fig
     
     # Define parameter groups
     conductivity_cols = ['sigma_total_mS', 'sigma_bulk_mS', 'sigma_gb_mS']
@@ -2921,92 +2904,19 @@ def plot_enhanced_correlation_matrix(df_long, temperature=600):
     microstructural_cols = ['density_percent', 'grain_size_um', 'porosity', 'S_V_ratio']
     
     # Collect available columns
-    available_conductivity = [c for c in conductivity_cols if c in plot_df.columns]
-    available_structural = [c for c in structural_cols if c in plot_df.columns]
-    available_electronic = [c for c in electronic_cols if c in plot_df.columns]
-    available_micro = [c for c in microstructural_cols if c in plot_df.columns]
+    available_conductivity = [c for c in conductivity_cols if c in plot_df.columns and plot_df[c].notna().any()]
+    available_structural = [c for c in structural_cols if c in plot_df.columns and plot_df[c].notna().any()]
+    available_electronic = [c for c in electronic_cols if c in plot_df.columns and plot_df[c].notna().any()]
+    available_micro = [c for c in microstructural_cols if c in plot_df.columns and plot_df[c].notna().any()]
     
     all_available = available_conductivity + available_structural + available_electronic + available_micro
     
     if len(all_available) < 3:
         fig, ax = plt.subplots(figsize=(12, 10))
-        ax.text(0.5, 0.5, 'Insufficient data for correlation matrix', 
-                ha='center', va='center', fontsize=14)
+        ax.text(0.5, 0.5, 'Insufficient data for correlation matrix (need at least 3 parameters with data)', 
+                ha='center', va='center', fontsize=12)
         ax.set_title(f'Correlation Matrix at {temperature}°C')
         return fig
-    
-    # Calculate correlation matrix
-    corr_matrix = plot_df[all_available].corr(method='pearson')
-    
-    # Create figure with larger size for grouped matrix
-    fig, ax = plt.subplots(figsize=(14, 12))
-    
-    # Create mask for upper triangle
-    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-    
-    # Heatmap with improved styling
-    sns.heatmap(corr_matrix, mask=mask, annot=True, fmt='.2f', 
-                cmap='RdBu_r', center=0, square=True, ax=ax,
-                cbar_kws={'label': 'Pearson Correlation Coefficient', 'shrink': 0.8},
-                annot_kws={'size': 9})
-    
-    # Add group separators
-    n_cond = len(available_conductivity)
-    n_struct = len(available_structural)
-    n_elec = len(available_electronic)
-    n_micro = len(available_micro)
-    
-    current_pos = 0
-    if n_cond > 0:
-        current_pos += n_cond
-        ax.axhline(y=current_pos, color='black', linewidth=2, linestyle='-')
-        ax.axvline(x=current_pos, color='black', linewidth=2, linestyle='-')
-    
-    if n_struct > 0:
-        current_pos += n_struct
-        ax.axhline(y=current_pos, color='black', linewidth=1.5, linestyle='--')
-        ax.axvline(x=current_pos, color='black', linewidth=1.5, linestyle='--')
-    
-    if n_elec > 0:
-        current_pos += n_elec
-        ax.axhline(y=current_pos, color='black', linewidth=1.5, linestyle='--')
-        ax.axvline(x=current_pos, color='black', linewidth=1.5, linestyle='--')
-    
-    # Add group labels
-    group_labels = []
-    if n_cond > 0:
-        group_labels.append('Conductivity')
-    if n_struct > 0:
-        group_labels.append('Structural')
-    if n_elec > 0:
-        group_labels.append('Electronic')
-    if n_micro > 0:
-        group_labels.append('Microstructural')
-    
-    # Add title with group information
-    title_text = f'Enhanced Correlation Matrix at {temperature}°C\n'
-    title_text += ' | '.join(group_labels)
-    ax.set_title(title_text, fontsize=12, fontweight='bold')
-    
-    # Highlight strong correlations with conductivity
-    if available_conductivity:
-        for cond_col in available_conductivity:
-            if cond_col in corr_matrix.columns:
-                cond_idx = all_available.index(cond_col)
-                for i, feat in enumerate(all_available):
-                    if i != cond_idx:
-                        corr_val = corr_matrix.iloc[cond_idx, i]
-                        if abs(corr_val) > 0.7:
-                            ax.text(i + 0.5, cond_idx + 0.5, '★', 
-                                   ha='center', va='center', 
-                                   color='gold', fontsize=14, fontweight='bold')
-                        elif abs(corr_val) > 0.5:
-                            ax.text(i + 0.5, cond_idx + 0.5, '•', 
-                                   ha='center', va='center', 
-                                   color='orange', fontsize=14)
-    
-    plt.tight_layout()
-    return fig
 
 
 # ============================================================================
