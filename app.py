@@ -2930,7 +2930,7 @@ def plot_correlation_by_temperature(df_long, feature, target='sigma_total_mS', a
     if any(p < 0.05 for p in p_values if not np.isnan(p)):
         ax.annotate('* p < 0.05', xy=(0.02, 0.98), xycoords='axes fraction', fontsize=8)
     
-    return fig  # Возвращаем Figure, а не Axes
+    return fig
 
 
 # ============================================================================
@@ -2986,68 +2986,118 @@ def plot_enhanced_correlation_matrix(df_long, temperature=600):
     # Plot 1: Conductivity vs Structural
     if available_conductivity and available_structural:
         sub_corr = corr_matrix.loc[available_conductivity, available_structural]
-        im1 = axes[0, 0].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
-        axes[0, 0].set_xticks(range(len(available_structural)))
-        axes[0, 0].set_xticklabels(available_structural, rotation=45, ha='right', fontsize=8)
-        axes[0, 0].set_yticks(range(len(available_conductivity)))
-        axes[0, 0].set_yticklabels(available_conductivity, fontsize=8)
+        # FIXED: Check if sub_corr has valid data before plotting
+        if sub_corr.size > 0 and not sub_corr.isnull().all().all():
+            im1 = axes[0, 0].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+            axes[0, 0].set_xticks(range(len(available_structural)))
+            axes[0, 0].set_xticklabels(available_structural, rotation=45, ha='right', fontsize=8)
+            axes[0, 0].set_yticks(range(len(available_conductivity)))
+            axes[0, 0].set_yticklabels(available_conductivity, fontsize=8)
+            axes[0, 0].set_title('Conductivity vs Structural Parameters')
+            plt.colorbar(im1, ax=axes[0, 0])
+            
+            # Add values with proper error handling
+            for i in range(len(available_conductivity)):
+                for j in range(len(available_structural)):
+                    if i < sub_corr.shape[0] and j < sub_corr.shape[1]:
+                        val = sub_corr.values[i, j]
+                        if not np.isnan(val):
+                            text_color = 'white' if abs(val) > 0.5 else 'black'
+                            axes[0, 0].text(j, i, f'{val:.2f}',
+                                           ha="center", va="center", 
+                                           color=text_color, fontsize=8)
+        else:
+            axes[0, 0].text(0.5, 0.5, 'Insufficient data', 
+                           ha='center', va='center', transform=axes[0, 0].transAxes)
+            axes[0, 0].set_title('Conductivity vs Structural Parameters')
+    else:
+        axes[0, 0].text(0.5, 0.5, 'No data available for this group', 
+                       ha='center', va='center', transform=axes[0, 0].transAxes)
         axes[0, 0].set_title('Conductivity vs Structural Parameters')
-        plt.colorbar(im1, ax=axes[0, 0])
-        
-        # Add values
-        for i in range(len(available_conductivity)):
-            for j in range(len(available_structural)):
-                text = axes[0, 0].text(j, i, f'{sub_corr.values[i, j]:.2f}',
-                                       ha="center", va="center", color="white" if abs(sub_corr.values[i, j]) > 0.5 else "black", fontsize=8)
     
     # Plot 2: Conductivity vs Electronic
     if available_conductivity and available_electronic:
         sub_corr = corr_matrix.loc[available_conductivity, available_electronic]
-        im2 = axes[0, 1].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
-        axes[0, 1].set_xticks(range(len(available_electronic)))
-        axes[0, 1].set_xticklabels(available_electronic, rotation=45, ha='right', fontsize=8)
-        axes[0, 1].set_yticks(range(len(available_conductivity)))
-        axes[0, 1].set_yticklabels(available_conductivity, fontsize=8)
+        # FIXED: Check if sub_corr has valid data before plotting
+        if sub_corr.size > 0 and not sub_corr.isnull().all().all():
+            im2 = axes[0, 1].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+            axes[0, 1].set_xticks(range(len(available_electronic)))
+            axes[0, 1].set_xticklabels(available_electronic, rotation=45, ha='right', fontsize=8)
+            axes[0, 1].set_yticks(range(len(available_conductivity)))
+            axes[0, 1].set_yticklabels(available_conductivity, fontsize=8)
+            axes[0, 1].set_title('Conductivity vs Electronic Parameters')
+            plt.colorbar(im2, ax=axes[0, 1])
+            
+            # Add values with proper error handling
+            for i in range(len(available_conductivity)):
+                for j in range(len(available_electronic)):
+                    if i < sub_corr.shape[0] and j < sub_corr.shape[1]:
+                        val = sub_corr.values[i, j]
+                        if not np.isnan(val):
+                            text_color = 'white' if abs(val) > 0.5 else 'black'
+                            axes[0, 1].text(j, i, f'{val:.2f}',
+                                           ha="center", va="center", 
+                                           color=text_color, fontsize=8)
+        else:
+            axes[0, 1].text(0.5, 0.5, 'Insufficient data', 
+                           ha='center', va='center', transform=axes[0, 1].transAxes)
+            axes[0, 1].set_title('Conductivity vs Electronic Parameters')
+    else:
+        axes[0, 1].text(0.5, 0.5, 'No data available for this group', 
+                       ha='center', va='center', transform=axes[0, 1].transAxes)
         axes[0, 1].set_title('Conductivity vs Electronic Parameters')
-        plt.colorbar(im2, ax=axes[0, 1])
-        
-        # Add values
-        for i in range(len(available_conductivity)):
-            for j in range(len(available_electronic)):
-                text = axes[0, 1].text(j, i, f'{sub_corr.values[i, j]:.2f}',
-                                       ha="center", va="center", color="white" if abs(sub_corr.values[i, j]) > 0.5 else "black", fontsize=8)
     
     # Plot 3: Conductivity vs Microstructural
     if available_conductivity and available_micro:
         sub_corr = corr_matrix.loc[available_conductivity, available_micro]
-        im3 = axes[1, 0].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
-        axes[1, 0].set_xticks(range(len(available_micro)))
-        axes[1, 0].set_xticklabels(available_micro, rotation=45, ha='right', fontsize=8)
-        axes[1, 0].set_yticks(range(len(available_conductivity)))
-        axes[1, 0].set_yticklabels(available_conductivity, fontsize=8)
+        # FIXED: Check if sub_corr has valid data before plotting
+        if sub_corr.size > 0 and not sub_corr.isnull().all().all():
+            im3 = axes[1, 0].imshow(sub_corr.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+            axes[1, 0].set_xticks(range(len(available_micro)))
+            axes[1, 0].set_xticklabels(available_micro, rotation=45, ha='right', fontsize=8)
+            axes[1, 0].set_yticks(range(len(available_conductivity)))
+            axes[1, 0].set_yticklabels(available_conductivity, fontsize=8)
+            axes[1, 0].set_title('Conductivity vs Microstructural Parameters')
+            plt.colorbar(im3, ax=axes[1, 0])
+            
+            # Add values with proper error handling
+            for i in range(len(available_conductivity)):
+                for j in range(len(available_micro)):
+                    if i < sub_corr.shape[0] and j < sub_corr.shape[1]:
+                        val = sub_corr.values[i, j]
+                        if not np.isnan(val):
+                            text_color = 'white' if abs(val) > 0.5 else 'black'
+                            axes[1, 0].text(j, i, f'{val:.2f}',
+                                           ha="center", va="center", 
+                                           color=text_color, fontsize=8)
+        else:
+            axes[1, 0].text(0.5, 0.5, 'Insufficient data', 
+                           ha='center', va='center', transform=axes[1, 0].transAxes)
+            axes[1, 0].set_title('Conductivity vs Microstructural Parameters')
+    else:
+        axes[1, 0].text(0.5, 0.5, 'No data available for this group', 
+                       ha='center', va='center', transform=axes[1, 0].transAxes)
         axes[1, 0].set_title('Conductivity vs Microstructural Parameters')
-        plt.colorbar(im3, ax=axes[1, 0])
-        
-        # Add values
-        for i in range(len(available_conductivity)):
-            for j in range(len(available_micro)):
-                text = axes[1, 0].text(j, i, f'{sub_corr.values[i, j]:.2f}',
-                                       ha="center", va="center", color="white" if abs(sub_corr.values[i, j]) > 0.5 else "black", fontsize=8)
     
     # Plot 4: Full correlation matrix heatmap
-    im4 = axes[1, 1].imshow(corr_matrix.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
-    axes[1, 1].set_xticks(range(len(all_available)))
-    axes[1, 1].set_xticklabels(all_available, rotation=90, ha='right', fontsize=8)
-    axes[1, 1].set_yticks(range(len(all_available)))
-    axes[1, 1].set_yticklabels(all_available, fontsize=8)
-    axes[1, 1].set_title('Full Correlation Matrix')
-    plt.colorbar(im4, ax=axes[1, 1])
+    # FIXED: Check if corr_matrix has valid data before plotting
+    if corr_matrix.size > 0 and not corr_matrix.isnull().all().all():
+        im4 = axes[1, 1].imshow(corr_matrix.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+        axes[1, 1].set_xticks(range(len(all_available)))
+        axes[1, 1].set_xticklabels(all_available, rotation=90, ha='right', fontsize=8)
+        axes[1, 1].set_yticks(range(len(all_available)))
+        axes[1, 1].set_yticklabels(all_available, fontsize=8)
+        axes[1, 1].set_title('Full Correlation Matrix')
+        plt.colorbar(im4, ax=axes[1, 1])
+    else:
+        axes[1, 1].text(0.5, 0.5, 'Insufficient data for full correlation matrix', 
+                       ha='center', va='center', transform=axes[1, 1].transAxes)
+        axes[1, 1].set_title('Full Correlation Matrix')
     
     plt.suptitle(f'Enhanced Correlation Analysis at {temperature}°C', fontsize=14, fontweight='bold')
     plt.tight_layout()
     
     return fig
-
 
 # ============================================================================
 # NEW: BUBBLE DIAGRAM FUNCTIONS
