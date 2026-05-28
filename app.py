@@ -2109,69 +2109,100 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     bubble_alpha = settings.get('bubble_alpha', 0.7)
     
     # ========================================================================
+    # HELPER FUNCTION to safely add scatter plot
+    # ========================================================================
+    def safe_scatter(ax, x_data, y_data, sizes=None, colors=None, labels=None, 
+                     cmap='viridis', colorbar_label=None, legend_label=None):
+        """Safely add scatter plot only if data is valid."""
+        if x_data is None or y_data is None or len(x_data) == 0:
+            return False
+        
+        # Remove NaN values
+        mask = ~(np.isnan(x_data) | np.isnan(y_data))
+        x_clean = x_data[mask]
+        y_clean = y_data[mask]
+        
+        if len(x_clean) == 0:
+            return False
+        
+        if colors is not None and len(colors) == len(x_data):
+            colors_clean = colors[mask]
+            if len(np.unique(colors_clean)) > 1:
+                scatter = ax.scatter(x_clean, y_clean, s=sizes if sizes is not None else 80,
+                                    c=colors_clean, cmap=cmap, alpha=bubble_alpha,
+                                    edgecolors='black', linewidth=0.5)
+                if colorbar_label:
+                    plt.colorbar(scatter, ax=ax, label=colorbar_label)
+            else:
+                ax.scatter(x_clean, y_clean, s=sizes if sizes is not None else 80,
+                          c=[colors_clean[0]] if len(colors_clean) > 0 else 'gray',
+                          alpha=bubble_alpha, edgecolors='black', linewidth=0.5)
+        else:
+            ax.scatter(x_clean, y_clean, s=sizes if sizes is not None else 80,
+                      c='#3B82F6', alpha=bubble_alpha, edgecolors='black', linewidth=0.5)
+        
+        return True
+    
+    # ========================================================================
     # Panel 1: Conductivity vs Additive Concentration
     # ========================================================================
     ax1 = axes[0, 0]
     
-    # FIX: Check if we have additive concentration data
-    if 'additive_concentration_wt' in plot_df.columns:
-        additive_conc_data = plot_df[plot_df['additive_concentration_wt'] > 0].copy()
-    else:
-        additive_conc_data = pd.DataFrame()
-    
-    if len(additive_conc_data) > 0 and 'sigma_total_mS' in additive_conc_data.columns:
-        panel_df = additive_conc_data.dropna(subset=['additive_concentration_wt', 'sigma_total_mS'])
+    # Check if we have the required columns
+    if all(col in plot_df.columns for col in ['additive_concentration_wt', 'sigma_total_mS']):
+        # Filter for positive additive concentrations
+        panel_df = plot_df[(plot_df['additive_concentration_wt'] > 0) & 
+                           plot_df['sigma_total_mS'].notna() &
+                           plot_df['additive_concentration_wt'].notna()].copy()
         
         if len(panel_df) > 0:
-            # Prepare sizes
-            if 'grain_size_um' in panel_df.columns and panel_df['grain_size_um'].notna().any():
-                size_min = panel_df['grain_size_um'].min()
-                size_max = panel_df['grain_size_um'].max()
-                if size_max > size_min:
-                    sizes = 50 + (panel_df['grain_size_um'] - size_min) / (size_max - size_min) * 300
-                else:
-                    sizes = 100
-            else:
-                sizes = 100
-            
-            # Check for density color
+            # Try to use density for coloring
             if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
-                scatter = ax1.scatter(panel_df['additive_concentration_wt'], panel_df['sigma_total_mS'],
-                                     s=sizes, c=panel_df['density_percent'],
-                                     cmap='viridis', alpha=bubble_alpha, edgecolors='black')
-                plt.colorbar(scatter, ax=ax1, label='Density (%)')
+                success = safe_scatter(
+                    ax1, 
+                    panel_df['additive_concentration_wt'].values,
+                    panel_df['sigma_total_mS'].values,
+                    sizes=80,
+                    colors=panel_df['density_percent'].values,
+                    cmap='viridis',
+                    colorbar_label='Density (%)'
+                )
+                if success:
+                    ax1.set_xlabel('Additive Concentration (wt%)')
+                    ax1.set_ylabel(f'σ at {temperature}°C (mS/cm)')
+                    ax1.set_title('Conductivity vs Additive Concentration')
+                    ax1.grid(True, alpha=0.3)
+                else:
+                    ax1.text(0.5, 0.5, 'No valid data points', transform=ax1.transAxes, ha='center', va='center')
+                    ax1.set_title('Conductivity vs Additive Concentration')
             else:
                 # Group by additive type
-                unique_additives = panel_df['additive_type'].unique()
-                plotted_additives = []
-                for additive in unique_additives:
+                plotted = False
+                for additive in panel_df['additive_type'].unique():
                     subset = panel_df[panel_df['additive_type'] == additive]
                     if len(subset) > 0:
-                        plotted_additives.append(additive)
-                        color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-                        # FIX: Handle sizes properly
-                        if isinstance(sizes, pd.Series):
-                            subset_sizes = sizes[subset.index]
-                        else:
-                            subset_sizes = sizes
+                        color = SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')
                         ax1.scatter(subset['additive_concentration_wt'], subset['sigma_total_mS'],
-                                   s=subset_sizes, c=[color], label=additive, 
-                                   alpha=bubble_alpha, edgecolors='black')
+                                   s=80, c=[color], label=additive, alpha=bubble_alpha,
+                                   edgecolors='black', linewidth=0.5)
+                        plotted = True
                 
-                if plotted_additives:
+                if plotted:
                     ax1.legend()
-            
-            ax1.set_xlabel('Additive Concentration (wt%)')
-            ax1.set_ylabel(f'σ at {temperature}°C (mS/cm)')
-            ax1.set_title('Conductivity vs Additive Concentration')
-            ax1.grid(True, alpha=0.3)
+                    ax1.set_xlabel('Additive Concentration (wt%)')
+                    ax1.set_ylabel(f'σ at {temperature}°C (mS/cm)')
+                    ax1.set_title('Conductivity vs Additive Concentration')
+                    ax1.grid(True, alpha=0.3)
+                else:
+                    ax1.text(0.5, 0.5, 'No valid data points', transform=ax1.transAxes, ha='center', va='center')
+                    ax1.set_title('Conductivity vs Additive Concentration')
         else:
-            ax1.text(0.5, 0.5, 'No valid data points after filtering', 
-                    ha='center', va='center', transform=ax1.transAxes, fontsize=12)
+            ax1.text(0.5, 0.5, 'No additive concentration data available', 
+                    transform=ax1.transAxes, ha='center', va='center')
             ax1.set_title('Conductivity vs Additive Concentration')
     else:
-        ax1.text(0.5, 0.5, 'Additive concentration data not available', 
-                ha='center', va='center', transform=ax1.transAxes, fontsize=12)
+        ax1.text(0.5, 0.5, 'Required columns not available', 
+                transform=ax1.transAxes, ha='center', va='center')
         ax1.set_title('Conductivity vs Additive Concentration')
     
     # ========================================================================
@@ -2179,51 +2210,39 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     # ========================================================================
     ax2 = axes[0, 1]
     
-    if 'tolerance_factor' in plot_df.columns and 'sigma_total_mS' in plot_df.columns:
-        tol_data = plot_df.dropna(subset=['tolerance_factor', 'sigma_total_mS']).copy()
-    else:
-        tol_data = pd.DataFrame()
-    
-    if len(tol_data) > 0:
-        panel_df = tol_data
+    if all(col in plot_df.columns for col in ['tolerance_factor', 'sigma_total_mS']):
+        panel_df = plot_df[plot_df['tolerance_factor'].notna() & 
+                           plot_df['sigma_total_mS'].notna()].copy()
         
-        # Prepare sizes
-        if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
-            size_min = panel_df['density_percent'].min()
-            size_max = panel_df['density_percent'].max()
-            if size_max > size_min:
-                sizes = 50 + (panel_df['density_percent'] - size_min) / (size_max - size_min) * 300
+        if len(panel_df) > 0:
+            plotted = False
+            for additive in panel_df['additive_type'].unique():
+                subset = panel_df[panel_df['additive_type'] == additive]
+                if len(subset) > 0:
+                    color = SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')
+                    ax2.scatter(subset['tolerance_factor'], subset['sigma_total_mS'],
+                               s=80, c=[color], label=additive, alpha=bubble_alpha,
+                               edgecolors='black', linewidth=0.5)
+                    plotted = True
+            
+            if plotted:
+                ax2.axvline(x=1.0, color='red', linestyle='--', alpha=0.5)
+                ax2.axvspan(0.96, 1.04, alpha=0.15, color='green')
+                ax2.set_xlabel('Tolerance Factor (t)')
+                ax2.set_ylabel(f'σ at {temperature}°C (mS/cm)')
+                ax2.set_title('Conductivity vs Structural Stability')
+                ax2.legend(loc='best')
+                ax2.grid(True, alpha=0.3)
             else:
-                sizes = 100
+                ax2.text(0.5, 0.5, 'No valid data points', transform=ax2.transAxes, ha='center', va='center')
+                ax2.set_title('Conductivity vs Tolerance Factor')
         else:
-            sizes = 100
-        
-        unique_additives = panel_df['additive_type'].unique()
-        plotted_additives = []
-        for additive in unique_additives:
-            subset = panel_df[panel_df['additive_type'] == additive]
-            if len(subset) > 0:
-                plotted_additives.append(additive)
-                color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-                if isinstance(sizes, pd.Series):
-                    subset_sizes = sizes[subset.index]
-                else:
-                    subset_sizes = sizes
-                ax2.scatter(subset['tolerance_factor'], subset['sigma_total_mS'],
-                           s=subset_sizes, c=[color], label=additive, 
-                           alpha=bubble_alpha, edgecolors='black')
-        
-        ax2.axvline(x=1.0, color='red', linestyle='--', alpha=0.5)
-        ax2.axvspan(0.96, 1.04, alpha=0.15, color='green')
-        ax2.set_xlabel('Tolerance Factor (t)')
-        ax2.set_ylabel(f'σ at {temperature}°C (mS/cm)')
-        ax2.set_title('Conductivity vs Structural Stability')
-        if plotted_additives:
-            ax2.legend(loc='best')
-        ax2.grid(True, alpha=0.3)
+            ax2.text(0.5, 0.5, 'No tolerance factor data available', 
+                    transform=ax2.transAxes, ha='center', va='center')
+            ax2.set_title('Conductivity vs Tolerance Factor')
     else:
-        ax2.text(0.5, 0.5, 'Insufficient tolerance factor data', 
-                ha='center', va='center', transform=ax2.transAxes, fontsize=12)
+        ax2.text(0.5, 0.5, 'Tolerance factor data not available', 
+                transform=ax2.transAxes, ha='center', va='center')
         ax2.set_title('Conductivity vs Tolerance Factor')
     
     # ========================================================================
@@ -2231,49 +2250,37 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     # ========================================================================
     ax3 = axes[1, 0]
     
-    if 'grain_size_um' in plot_df.columns and 'sigma_total_mS' in plot_df.columns:
-        grain_data = plot_df.dropna(subset=['grain_size_um', 'sigma_total_mS']).copy()
-    else:
-        grain_data = pd.DataFrame()
-    
-    if len(grain_data) > 0:
-        panel_df = grain_data
+    if all(col in plot_df.columns for col in ['grain_size_um', 'sigma_total_mS']):
+        panel_df = plot_df[plot_df['grain_size_um'].notna() & 
+                           plot_df['sigma_total_mS'].notna()].copy()
         
-        # Prepare sizes (using density)
-        if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
-            size_min = panel_df['density_percent'].min()
-            size_max = panel_df['density_percent'].max()
-            if size_max > size_min:
-                sizes = 50 + (panel_df['density_percent'] - size_min) / (size_max - size_min) * 300
+        if len(panel_df) > 0:
+            plotted = False
+            for additive in panel_df['additive_type'].unique():
+                subset = panel_df[panel_df['additive_type'] == additive]
+                if len(subset) > 0:
+                    color = SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')
+                    ax3.scatter(subset['grain_size_um'], subset['sigma_total_mS'],
+                               s=80, c=[color], label=additive, alpha=bubble_alpha,
+                               edgecolors='black', linewidth=0.5)
+                    plotted = True
+            
+            if plotted:
+                ax3.set_xlabel('Grain Size (μm)')
+                ax3.set_ylabel(f'σ at {temperature}°C (mS/cm)')
+                ax3.set_title('Microstructural Effect')
+                ax3.legend(loc='best')
+                ax3.grid(True, alpha=0.3)
             else:
-                sizes = 100
+                ax3.text(0.5, 0.5, 'No valid data points', transform=ax3.transAxes, ha='center', va='center')
+                ax3.set_title('Conductivity vs Grain Size')
         else:
-            sizes = 100
-        
-        unique_additives = panel_df['additive_type'].unique()
-        plotted_additives = []
-        for additive in unique_additives:
-            subset = panel_df[panel_df['additive_type'] == additive]
-            if len(subset) > 0:
-                plotted_additives.append(additive)
-                color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-                if isinstance(sizes, pd.Series):
-                    subset_sizes = sizes[subset.index]
-                else:
-                    subset_sizes = sizes
-                ax3.scatter(subset['grain_size_um'], subset['sigma_total_mS'],
-                           s=subset_sizes, c=[color], label=additive, 
-                           alpha=bubble_alpha, edgecolors='black')
-        
-        ax3.set_xlabel('Grain Size (μm)')
-        ax3.set_ylabel(f'σ at {temperature}°C (mS/cm)')
-        ax3.set_title('Microstructural Effect (Size = Density)')
-        if plotted_additives:
-            ax3.legend(loc='best')
-        ax3.grid(True, alpha=0.3)
+            ax3.text(0.5, 0.5, 'No grain size data available', 
+                    transform=ax3.transAxes, ha='center', va='center')
+            ax3.set_title('Conductivity vs Grain Size')
     else:
-        ax3.text(0.5, 0.5, 'Insufficient grain size data', 
-                ha='center', va='center', transform=ax3.transAxes, fontsize=12)
+        ax3.text(0.5, 0.5, 'Grain size data not available', 
+                transform=ax3.transAxes, ha='center', va='center')
         ax3.set_title('Conductivity vs Grain Size')
     
     # ========================================================================
@@ -2281,49 +2288,37 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     # ========================================================================
     ax4 = axes[1, 1]
     
-    if 'density_percent' in plot_df.columns and 'sigma_total_mS' in plot_df.columns:
-        density_data = plot_df.dropna(subset=['density_percent', 'sigma_total_mS']).copy()
-    else:
-        density_data = pd.DataFrame()
-    
-    if len(density_data) > 0:
-        panel_df = density_data
+    if all(col in plot_df.columns for col in ['density_percent', 'sigma_total_mS']):
+        panel_df = plot_df[plot_df['density_percent'].notna() & 
+                           plot_df['sigma_total_mS'].notna()].copy()
         
-        # Prepare sizes (using grain size)
-        if 'grain_size_um' in panel_df.columns and panel_df['grain_size_um'].notna().any():
-            size_min = panel_df['grain_size_um'].min()
-            size_max = panel_df['grain_size_um'].max()
-            if size_max > size_min:
-                sizes = 50 + (panel_df['grain_size_um'] - size_min) / (size_max - size_min) * 300
+        if len(panel_df) > 0:
+            plotted = False
+            for additive in panel_df['additive_type'].unique():
+                subset = panel_df[panel_df['additive_type'] == additive]
+                if len(subset) > 0:
+                    color = SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')
+                    ax4.scatter(subset['density_percent'], subset['sigma_total_mS'],
+                               s=80, c=[color], label=additive, alpha=bubble_alpha,
+                               edgecolors='black', linewidth=0.5)
+                    plotted = True
+            
+            if plotted:
+                ax4.set_xlabel('Relative Density (%)')
+                ax4.set_ylabel(f'σ at {temperature}°C (mS/cm)')
+                ax4.set_title('Densification Effect')
+                ax4.legend(loc='best')
+                ax4.grid(True, alpha=0.3)
             else:
-                sizes = 100
+                ax4.text(0.5, 0.5, 'No valid data points', transform=ax4.transAxes, ha='center', va='center')
+                ax4.set_title('Conductivity vs Density')
         else:
-            sizes = 100
-        
-        unique_additives = panel_df['additive_type'].unique()
-        plotted_additives = []
-        for additive in unique_additives:
-            subset = panel_df[panel_df['additive_type'] == additive]
-            if len(subset) > 0:
-                plotted_additives.append(additive)
-                color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-                if isinstance(sizes, pd.Series):
-                    subset_sizes = sizes[subset.index]
-                else:
-                    subset_sizes = sizes
-                ax4.scatter(subset['density_percent'], subset['sigma_total_mS'],
-                           s=subset_sizes, c=[color], label=additive, 
-                           alpha=bubble_alpha, edgecolors='black')
-        
-        ax4.set_xlabel('Relative Density (%)')
-        ax4.set_ylabel(f'σ at {temperature}°C (mS/cm)')
-        ax4.set_title('Densification Effect (Size = Grain Size)')
-        if plotted_additives:
-            ax4.legend(loc='best')
-        ax4.grid(True, alpha=0.3)
+            ax4.text(0.5, 0.5, 'No density data available', 
+                    transform=ax4.transAxes, ha='center', va='center')
+            ax4.set_title('Conductivity vs Density')
     else:
-        ax4.text(0.5, 0.5, 'Insufficient density data', 
-                ha='center', va='center', transform=ax4.transAxes, fontsize=12)
+        ax4.text(0.5, 0.5, 'Density data not available', 
+                transform=ax4.transAxes, ha='center', va='center')
         ax4.set_title('Conductivity vs Density')
     
     plt.suptitle(f'Multi-Panel Bubble Analysis at {temperature}°C\nComprehensive View of Sintering Additive Effects',
