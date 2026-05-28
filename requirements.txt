@@ -11,4 +11,3 @@ scikit-learn
 openpyxl
 shap
 xgboost
-umap
