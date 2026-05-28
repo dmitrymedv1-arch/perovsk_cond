@@ -31,6 +31,7 @@ from scipy.stats import spearmanr
 from scipy.stats import linregress
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import make_pipeline
+from scipy.stats import pearsonr
 from scipy.spatial import cKDTree
 import time
 try:
@@ -3306,6 +3307,134 @@ def plot_incorporation_effect(df_long, temperature=600):
     
     return fig
 
+def plot_partial_correlations(df, features, target, control_vars, ax, temperature):
+    """
+    Plot partial correlations between features and target, controlling for specified variables.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data (long format, already filtered by temperature)
+    features : list
+        List of feature names to analyze
+    target : str
+        Target variable name
+    control_vars : list
+        List of control variable names
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    temperature : int
+        Temperature in Celsius for title
+    """
+    results = []
+    
+    for feature in features:
+        if feature not in df.columns or target not in df.columns:
+            continue
+        
+        # Prepare data - drop NaN values
+        all_vars = [target, feature] + control_vars
+        clean_df = df[all_vars].dropna()
+        
+        if len(clean_df) < 5:
+            results.append({
+                'feature': feature,
+                'partial_correlation': np.nan,
+                'p_value': np.nan,
+                'n_points': len(clean_df),
+                'significance': 'insufficient data'
+            })
+            continue
+        
+        try:
+            # Calculate residuals for target and feature after regressing out controls
+            X_controls = clean_df[control_vars].values
+            
+            # Add constant term
+            X_controls_with_const = np.column_stack([np.ones(len(X_controls)), X_controls])
+            y_target = clean_df[target].values
+            y_feature = clean_df[feature].values
+            
+            # Linear regression for target
+            beta_target = np.linalg.lstsq(X_controls_with_const, y_target, rcond=None)[0]
+            residual_target = y_target - X_controls_with_const @ beta_target
+            
+            # Linear regression for feature
+            beta_feature = np.linalg.lstsq(X_controls_with_const, y_feature, rcond=None)[0]
+            residual_feature = y_feature - X_controls_with_const @ beta_feature
+            
+            # Correlation of residuals
+            corr, p_val = pearsonr(residual_target, residual_feature)
+            
+            # Determine significance level
+            if p_val < 0.001:
+                significance = '*** (p < 0.001)'
+            elif p_val < 0.01:
+                significance = '** (p < 0.01)'
+            elif p_val < 0.05:
+                significance = '* (p < 0.05)'
+            else:
+                significance = 'ns (p ≥ 0.05)'
+            
+            results.append({
+                'feature': feature,
+                'partial_correlation': corr,
+                'p_value': p_val,
+                'n_points': len(clean_df),
+                'significance': significance
+            })
+        except Exception as e:
+            results.append({
+                'feature': feature,
+                'partial_correlation': np.nan,
+                'p_value': np.nan,
+                'n_points': len(clean_df),
+                'significance': f'error: {str(e)[:30]}'
+            })
+    
+    # Create results DataFrame
+    results_df = pd.DataFrame(results)
+    
+    # Sort by absolute partial correlation
+    results_df['abs_corr'] = results_df['partial_correlation'].abs()
+    results_df = results_df.sort_values('abs_corr', ascending=False).drop('abs_corr', axis=1)
+    
+    # Filter out NaN values for plotting
+    plot_df = results_df[results_df['partial_correlation'].notna()]
+    
+    if len(plot_df) == 0:
+        ax.text(0.5, 0.5, 'No valid partial correlations could be computed\n(Insufficient data or high collinearity)',
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
+        ax.set_title(f'Partial Correlation Analysis at {temperature}°C\n(controlling for {", ".join(control_vars)})')
+        return ax
+    
+    # Create bar chart
+    colors = ['#EF4444' if x < 0 else '#10B981' for x in plot_df['partial_correlation'].values]
+    bars = ax.barh(range(len(plot_df)), plot_df['partial_correlation'].values, 
+                   color=colors, edgecolor='black', alpha=0.8)
+    
+    # Add value labels
+    for i, (idx, row) in enumerate(plot_df.iterrows()):
+        corr_val = row['partial_correlation']
+        label_x = corr_val + (0.02 if corr_val >= 0 else -0.08)
+        ax.text(label_x, i, f'{corr_val:.2f} {row["significance"]}', 
+                va='center', fontsize=9)
+    
+    # Add zero line
+    ax.axvline(x=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+    
+    # Labels
+    ax.set_yticks(range(len(plot_df)))
+    ax.set_yticklabels(plot_df['feature'].values, fontsize=10)
+    ax.set_xlabel('Partial Correlation Coefficient')
+    ax.set_title(f'Partial Correlation Analysis at {temperature}°C\n(controlling for {", ".join(control_vars)})')
+    ax.grid(True, alpha=0.3, axis='x')
+    
+    # Add annotation for significance levels
+    ax.annotate('Significance: *** p<0.001, ** p<0.01, * p<0.05, ns not significant',
+                xy=(0.02, -0.12), xycoords='axes fraction', fontsize=8, alpha=0.7)
+    
+    return ax
 
 # ============================================================================
 # ENHANCED FUNCTIONS FOR EXISTING PLOTS (WITH D_TYPE AND D_CONC)
