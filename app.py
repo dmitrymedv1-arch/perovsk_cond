@@ -1806,36 +1806,6 @@ def plot_contour_map(df_long, x_col, y_col, z_col, temperature,
                      show_points=True, show_labels=True, n_levels=20):
     """
     Universal contour map with interpolation on irregular grid.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    x_col : str
-        X-axis column name (wt%, Ce_ratio, t, Δχ, rBav/rO, T_sin, d, S/V, ρ, D_conc)
-    y_col : str
-        Y-axis column name (Ce_ratio, wt%, t, Δχ, Ea, T_sin, 1/d, D_conc)
-    z_col : str
-        Z-axis (color) column name (σ_total, σ_bulk, σ_gb, σ_gb/σ_total, Ea_total, Ea_gb, log(σ))
-    temperature : int
-        Temperature in Celsius (used if z_col contains conductivity)
-    filter_dict : dict
-        Dictionary of filters {'additive_type': [...], 'dopant': [...], 'atmosphere': [...], etc.}
-    n_grid : int
-        Grid resolution for interpolation
-    cmap : str
-        Colormap name
-    show_points : bool
-        Show original data points on contour
-    show_labels : bool
-        Show contour labels
-    n_levels : int
-        Number of contour levels
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with contour plot
     """
     # Apply filters
     plot_df = df_long.copy()
@@ -1856,10 +1826,12 @@ def plot_contour_map(df_long, x_col, y_col, z_col, temperature,
     # Prepare data for contour
     plot_df = plot_df.dropna(subset=[x_col, y_col, z_col])
     
+    # FIX: Check if we have enough data (at least 4 points for interpolation)
     if len(plot_df) < 4:
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.text(0.5, 0.5, f'Insufficient data for contour map\n(need at least 4 points, have {len(plot_df)})',
-                ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
+        ax.set_title('Insufficient Data for Contour Map')
         return fig
     
     # Extract coordinates
@@ -1875,33 +1847,43 @@ def plot_contour_map(df_long, x_col, y_col, z_col, temperature,
     # Interpolation using griddata
     try:
         Zi = griddata((x, y), z, (Xi, Yi), method='cubic')
+        # FIX: Check if interpolation produced valid results
+        if np.all(np.isnan(Zi)):
+            raise ValueError("Cubic interpolation failed")
     except:
         try:
             Zi = griddata((x, y), z, (Xi, Yi), method='linear')
+            if np.all(np.isnan(Zi)):
+                raise ValueError("Linear interpolation failed")
         except:
             fig, ax = plt.subplots(figsize=(10, 8))
             ax.text(0.5, 0.5, 'Interpolation failed (insufficient or poorly distributed data)',
-                    ha='center', va='center', transform=ax.transAxes)
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_title('Interpolation Failed')
             return fig
     
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Plot contour
-    contour = ax.contourf(Xi, Yi, Zi, levels=n_levels, cmap=cmap, alpha=0.8)
-    cbar = plt.colorbar(contour, ax=ax)
-    cbar.set_label(z_col.replace('_', ' ').title())
-    
-    # Add contour lines
-    if n_levels > 5:
-        contour_lines = ax.contour(Xi, Yi, Zi, levels=n_levels//2, colors='black', linewidths=0.5, alpha=0.3)
-    
-    # Add contour labels
-    if show_labels and n_levels > 5:
-        ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%.2f')
+    # Plot contour (FIX: Ensure we have valid data)
+    if not np.all(np.isnan(Zi)):
+        contour = ax.contourf(Xi, Yi, Zi, levels=n_levels, cmap=cmap, alpha=0.8)
+        cbar = plt.colorbar(contour, ax=ax)
+        cbar.set_label(z_col.replace('_', ' ').title())
+        
+        # Add contour lines
+        if n_levels > 5:
+            contour_lines = ax.contour(Xi, Yi, Zi, levels=n_levels//2, colors='black', linewidths=0.5, alpha=0.3)
+        
+        # Add contour labels
+        if show_labels and n_levels > 5 and 'contour_lines' in locals():
+            ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%.2f')
+    else:
+        ax.text(0.5, 0.5, 'No valid contours could be generated',
+                ha='center', va='center', transform=ax.transAxes)
     
     # Add original data points
-    if show_points:
+    if show_points and len(plot_df) > 0:
         scatter = ax.scatter(x, y, c=z, cmap=cmap, s=st.session_state.plot_settings.get('marker_size', 80),
                             edgecolors='black', linewidth=0.5, alpha=st.session_state.plot_settings.get('bubble_alpha', 0.7), zorder=5)
     
@@ -1917,8 +1899,7 @@ def plot_contour_map(df_long, x_col, y_col, z_col, temperature,
     ax.grid(True, alpha=0.3)
     
     return fig
-
-
+                         
 # ============================================================================
 # NEW FUNCTIONS FOR BUBBLE DIAGRAMS (PARAMETERIZED)
 # ============================================================================
@@ -1955,32 +1936,6 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
                         filter_dict=None, show_trend=True, cmap='viridis'):
     """
     Universal bubble diagram for multi-parameter analysis.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    x_col : str
-        X-axis column (wt%, Ce_ratio, t, T_sin, d, S/V, ρ, 1/d, Δχ, D_conc)
-    y_col : str
-        Y-axis column (σ_total, σ_bulk, σ_gb, σ_gb/σ_total, Ea, log(σ))
-    size_col : str
-        Column for bubble size (d, S/V, ρ, wt%, 1/d, σ_bulk/σ_gb, D_conc)
-    color_col : str
-        Column for bubble color (ρ, T_sin, Ea, Ce_ratio, Δχ, D_type, additive_type)
-    temperature : int
-        Temperature in Celsius (used if y_col contains conductivity)
-    filter_dict : dict
-        Dictionary of filters
-    show_trend : bool
-        Show trend lines
-    cmap : str
-        Colormap for color scale
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with bubble diagram
     """
     # Apply filters
     plot_df = df_long.copy()
@@ -2001,10 +1956,11 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
     # Prepare data
     plot_df = plot_df.dropna(subset=[x_col, y_col])
     
+    # FIX: Check if we have enough data
     if len(plot_df) < 3:
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.text(0.5, 0.5, f'Insufficient data for bubble diagram (need at least 3 points, have {len(plot_df)})',
-                ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('Insufficient Data')
         return fig
     
@@ -2012,7 +1968,6 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
     
     settings = st.session_state.plot_settings
     bubble_alpha = settings.get('bubble_alpha', 0.7)
-    marker_size_setting = settings.get('marker_size', 80)
     
     # Prepare bubble sizes
     if size_col is not None and size_col in plot_df.columns and plot_df[size_col].notna().any():
@@ -2029,12 +1984,14 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
     if color_col is not None and color_col in plot_df.columns and plot_df[color_col].notna().any():
         # Numeric color
         if pd.api.types.is_numeric_dtype(plot_df[color_col]):
-            scatter = ax.scatter(plot_df[x_col], plot_df[y_col],
-                                s=sizes, c=plot_df[color_col],
-                                cmap=cmap, alpha=bubble_alpha,
-                                edgecolors='black', linewidth=0.5)
-            cbar = plt.colorbar(scatter, ax=ax)
-            cbar.set_label(color_col.replace('_', ' ').title())
+            # FIX: Only create scatter if we have valid data
+            if len(plot_df) > 0:
+                scatter = ax.scatter(plot_df[x_col], plot_df[y_col],
+                                    s=sizes, c=plot_df[color_col],
+                                    cmap=cmap, alpha=bubble_alpha,
+                                    edgecolors='black', linewidth=0.5)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label(color_col.replace('_', ' ').title())
         else:
             # Categorical color
             unique_cats = plot_df[color_col].unique()
@@ -2047,8 +2004,10 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
                         color = DOPANT_COLORS.get(cat_val, DOPANT_COLORS['default'])
                     else:
                         color = '#3B82F6'
+                    # FIX: Handle sizes properly
+                    subset_sizes = sizes[subset.index] if isinstance(sizes, pd.Series) else sizes
                     ax.scatter(subset[x_col], subset[y_col],
-                              s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                              s=subset_sizes,
                               c=[color], label=str(cat_val), alpha=bubble_alpha,
                               edgecolors='black', linewidth=0.5)
             if len(unique_cats) > 0:
@@ -2060,15 +2019,16 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
             subset = plot_df[plot_df['additive_type'] == additive]
             if len(subset) > 0:
                 color = SINTERING_ADDITIVE_COLORS.get(additive, SINTERING_ADDITIVE_COLORS['default'])
+                subset_sizes = sizes[subset.index] if isinstance(sizes, pd.Series) else sizes
                 ax.scatter(subset[x_col], subset[y_col],
-                          s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                          s=subset_sizes,
                           c=[color], label=additive, alpha=bubble_alpha,
                           edgecolors='black', linewidth=0.5)
         if len(unique_additives) > 0:
             ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     
-    # Add trend lines
-    if show_trend:
+    # Add trend lines (FIX: Only if we have data)
+    if show_trend and len(plot_df) >= 3:
         if color_col is not None and color_col in plot_df.columns and not pd.api.types.is_numeric_dtype(plot_df[color_col]):
             # Trend per category
             unique_cats = plot_df[color_col].unique()
@@ -2093,9 +2053,9 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
                 except Exception:
                     pass
     
-    # Add legend for bubble size
+    # Add legend for bubble size (FIX: Only if size_col has meaningful data)
     from matplotlib.lines import Line2D
-    if size_col is not None and size_col in plot_df.columns and plot_df[size_col].notna().any():
+    if size_col is not None and size_col in plot_df.columns and plot_df[size_col].notna().any() and len(plot_df) > 0:
         size_quantiles = plot_df[size_col].quantile([0.25, 0.5, 0.75])
         legend_elements = [
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
@@ -2127,7 +2087,6 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
     plt.tight_layout()
     return fig
 
-
 def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None):
     """
     Multi-panel bubble analysis for comprehensive understanding.
@@ -2152,6 +2111,8 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     # Panel 1: Conductivity vs Additive Concentration
     ax1 = axes[0, 0]
     additive_conc_data = plot_df[plot_df['additive_concentration_wt'] > 0] if 'additive_concentration_wt' in plot_df.columns else pd.DataFrame()
+    
+    # FIX: Check if we have data before plotting
     if len(additive_conc_data) > 0:
         panel_df = additive_conc_data
         if 'grain_size_um' in panel_df.columns and panel_df['grain_size_um'].notna().any():
@@ -2170,7 +2131,6 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
                                  cmap='viridis', alpha=bubble_alpha, edgecolors='black')
             plt.colorbar(scatter, ax=ax1, label='Density (%)')
         else:
-            # Only add legend if there are actual categories
             unique_additives = panel_df['additive_type'].unique()
             for additive in unique_additives:
                 subset = panel_df[panel_df['additive_type'] == additive]
@@ -2186,12 +2146,17 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
         ax1.set_title('Conductivity vs Additive Concentration')
         ax1.grid(True, alpha=0.3)
     else:
-        ax1.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax1.transAxes)
+        # FIX: Clear the axis and show message instead of plotting empty data
+        ax1.clear()
+        ax1.text(0.5, 0.5, 'Insufficient data for additive concentration analysis', 
+                ha='center', va='center', transform=ax1.transAxes, fontsize=12)
         ax1.set_title('Conductivity vs Additive Concentration')
     
     # Panel 2: Conductivity vs Tolerance Factor
     ax2 = axes[0, 1]
     tol_data = plot_df.dropna(subset=['tolerance_factor']) if 'tolerance_factor' in plot_df.columns else pd.DataFrame()
+    
+    # FIX: Check if we have data before plotting
     if len(tol_data) > 0:
         panel_df = tol_data
         if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
@@ -2222,12 +2187,17 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
             ax2.legend(loc='best')
         ax2.grid(True, alpha=0.3)
     else:
-        ax2.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax2.transAxes)
+        # FIX: Clear the axis and show message
+        ax2.clear()
+        ax2.text(0.5, 0.5, 'Insufficient tolerance factor data', 
+                ha='center', va='center', transform=ax2.transAxes, fontsize=12)
         ax2.set_title('Conductivity vs Tolerance Factor')
     
     # Panel 3: Conductivity vs Grain Size
     ax3 = axes[1, 0]
     grain_data = plot_df.dropna(subset=['grain_size_um']) if 'grain_size_um' in plot_df.columns else pd.DataFrame()
+    
+    # FIX: Check if we have data before plotting
     if len(grain_data) > 0:
         panel_df = grain_data
         if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
@@ -2256,12 +2226,17 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
             ax3.legend(loc='best')
         ax3.grid(True, alpha=0.3)
     else:
-        ax3.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax3.transAxes)
+        # FIX: Clear the axis and show message
+        ax3.clear()
+        ax3.text(0.5, 0.5, 'Insufficient grain size data', 
+                ha='center', va='center', transform=ax3.transAxes, fontsize=12)
         ax3.set_title('Conductivity vs Grain Size')
     
     # Panel 4: Conductivity vs Density
     ax4 = axes[1, 1]
     density_data = plot_df.dropna(subset=['density_percent']) if 'density_percent' in plot_df.columns else pd.DataFrame()
+    
+    # FIX: Check if we have data before plotting
     if len(density_data) > 0:
         panel_df = density_data
         if 'grain_size_um' in panel_df.columns and panel_df['grain_size_um'].notna().any():
@@ -2290,7 +2265,10 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
             ax4.legend(loc='best')
         ax4.grid(True, alpha=0.3)
     else:
-        ax4.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax4.transAxes)
+        # FIX: Clear the axis and show message
+        ax4.clear()
+        ax4.text(0.5, 0.5, 'Insufficient density data', 
+                ha='center', va='center', transform=ax4.transAxes, fontsize=12)
         ax4.set_title('Conductivity vs Density')
     
     plt.suptitle(f'Multi-Panel Bubble Analysis at {temperature}°C\nComprehensive View of Sintering Additive Effects',
@@ -2299,7 +2277,6 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     
     return fig
 
-
 # ============================================================================
 # NEW FUNCTIONS FOR POISONING ANALYSIS (DENSIFICATION VS POISONING)
 # ============================================================================
@@ -2307,18 +2284,6 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
 def plot_poisoning_analysis(df_long, temperature=600):
     """
     Comprehensive poisoning analysis showing densification vs grain boundary poisoning.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    temperature : int
-        Temperature in Celsius
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with multiple subplots
     """
     # Prepare data
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
@@ -2339,6 +2304,7 @@ def plot_poisoning_analysis(df_long, temperature=600):
         if has_pure and has_add:
             common_t_sin.append(ts)
     
+    # FIX: Check if we have common sintering temperatures
     if common_t_sin:
         ts_fixed = common_t_sin[0]
         fixed_T_df = plot_df[plot_df['T_sin'] == ts_fixed]
@@ -2357,27 +2323,40 @@ def plot_poisoning_analysis(df_long, temperature=600):
             
             for add in additives:
                 add_data = additive_data[additive_data['additive_type'] == add]
-                additive_means.append(add_data['sigma_total_mS'].mean())
-                additive_stds.append(add_data['sigma_total_mS'].std())
-                additive_names.append(add)
+                if len(add_data) > 0:  # FIX: Check if we have data
+                    additive_means.append(add_data['sigma_total_mS'].mean())
+                    additive_stds.append(add_data['sigma_total_mS'].std())
+                    additive_names.append(add)
             
-            x_pos = np.arange(len(additives) + 1)
-            means = [pure_mean] + additive_means
-            stds = [pure_std] + additive_stds
-            labels = ['Pure'] + additive_names
-            colors = ['#10B981'] + [SINTERING_ADDITIVE_COLORS.get(a, '#6B7280') for a in additive_names]
-            
-            bars = ax1.bar(x_pos, means, yerr=stds, capsize=5, color=colors, edgecolor='black')
-            ax1.set_xticks(x_pos)
-            ax1.set_xticklabels(labels, rotation=45, ha='right')
-            ax1.set_ylabel(f'σ total at {temperature}°C (mS/cm)')
-            ax1.set_title(f'Fixed Sintering Temperature ({ts_fixed:.0f}°C): Additives Improve Conductivity')
-            ax1.grid(True, alpha=0.3, axis='y')
-            
-            # Add value labels
-            for i, (bar, val) in enumerate(zip(bars, means)):
-                ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + stds[i] + 0.01,
-                        f'{val:.3f}', ha='center', fontsize=8)
+            # FIX: Only create bar chart if we have data
+            if additive_means:
+                x_pos = np.arange(len(additives) + 1)
+                means = [pure_mean] + additive_means
+                stds = [pure_std] + additive_stds
+                labels = ['Pure'] + additive_names
+                colors = ['#10B981'] + [SINTERING_ADDITIVE_COLORS.get(a, '#6B7280') for a in additive_names]
+                
+                bars = ax1.bar(x_pos[:len(means)], means, yerr=stds[:len(means)], capsize=5, 
+                              color=colors, edgecolor='black')
+                ax1.set_xticks(x_pos[:len(means)])
+                ax1.set_xticklabels(labels, rotation=45, ha='right')
+                ax1.set_ylabel(f'σ total at {temperature}°C (mS/cm)')
+                ax1.set_title(f'Fixed Sintering Temperature ({ts_fixed:.0f}°C): Additives vs Pure')
+                ax1.grid(True, alpha=0.3, axis='y')
+                
+                # Add value labels
+                for i, (bar, val) in enumerate(zip(bars, means)):
+                    if i < len(stds):
+                        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + stds[i] + 0.01,
+                                f'{val:.3f}', ha='center', fontsize=8)
+            else:
+                ax1.text(0.5, 0.5, 'No valid additive data for comparison', 
+                        ha='center', va='center', transform=ax1.transAxes)
+                ax1.set_title('Fixed T_sin Comparison')
+        else:
+            ax1.text(0.5, 0.5, 'No pure or additive samples at common temperature', 
+                    ha='center', va='center', transform=ax1.transAxes)
+            ax1.set_title('Fixed T_sin Comparison')
     else:
         ax1.text(0.5, 0.5, 'No common sintering temperature with both Pure and Additive samples', 
                 ha='center', va='center', transform=ax1.transAxes)
@@ -2389,27 +2368,30 @@ def plot_poisoning_analysis(df_long, temperature=600):
     density_bins = np.linspace(85, 100, 4)
     poisoning_data = []
     
-    for i in range(len(density_bins)-1):
-        low_d = density_bins[i]
-        high_d = density_bins[i+1]
-        
-        pure_in_bin = plot_df[(plot_df['additive_type'] == 'Pure') & 
-                              (plot_df['density_percent'] >= low_d) & 
-                              (plot_df['density_percent'] <= high_d)]
-        add_in_bin = plot_df[(plot_df['additive_type'] != 'Pure') & 
-                             (plot_df['density_percent'] >= low_d) & 
-                             (plot_df['density_percent'] <= high_d)]
-        
-        if len(pure_in_bin) > 0 and len(add_in_bin) > 0:
-            pure_cond = pure_in_bin['sigma_total_mS'].mean()
-            add_cond = add_in_bin['sigma_total_mS'].mean()
-            ratio = add_cond / pure_cond if pure_cond > 0 else np.nan
-            poisoning_data.append({
-                'density_range': f'{low_d:.0f}-{high_d:.0f}%',
-                'ratio': ratio,
-                'n_pure': len(pure_in_bin),
-                'n_add': len(add_in_bin)
-            })
+    # FIX: Only proceed if we have density data
+    if 'density_percent' in plot_df.columns and plot_df['density_percent'].notna().any():
+        for i in range(len(density_bins)-1):
+            low_d = density_bins[i]
+            high_d = density_bins[i+1]
+            
+            pure_in_bin = plot_df[(plot_df['additive_type'] == 'Pure') & 
+                                  (plot_df['density_percent'] >= low_d) & 
+                                  (plot_df['density_percent'] <= high_d)]
+            add_in_bin = plot_df[(plot_df['additive_type'] != 'Pure') & 
+                                 (plot_df['density_percent'] >= low_d) & 
+                                 (plot_df['density_percent'] <= high_d)]
+            
+            if len(pure_in_bin) > 0 and len(add_in_bin) > 0:
+                pure_cond = pure_in_bin['sigma_total_mS'].mean()
+                add_cond = add_in_bin['sigma_total_mS'].mean()
+                ratio = add_cond / pure_cond if pure_cond > 0 else np.nan
+                if not np.isnan(ratio):
+                    poisoning_data.append({
+                        'density_range': f'{low_d:.0f}-{high_d:.0f}%',
+                        'ratio': ratio,
+                        'n_pure': len(pure_in_bin),
+                        'n_add': len(add_in_bin)
+                    })
     
     if poisoning_data:
         poisoning_df = pd.DataFrame(poisoning_data)
@@ -2430,7 +2412,7 @@ def plot_poisoning_analysis(df_long, temperature=600):
                 ax2.text(i, row['ratio'] - 0.08, 'Poisoning!', ha='center', fontsize=8, color='red')
     else:
         ax2.text(0.5, 0.5, 'No matched density data for comparison', 
-                ha='center', va='center', transform=ax2.transAxes)
+                ha='center', va='center', transform=ax2.transAxes, fontsize=12)
         ax2.set_title('Matched Density Comparison')
     
     # Panel 3: GB ratio vs Densification boost
@@ -2438,35 +2420,72 @@ def plot_poisoning_analysis(df_long, temperature=600):
     # Calculate for each additive type
     additives = plot_df[plot_df['additive_type'] != 'Pure']['additive_type'].unique()
     
-    for additive in additives:
-        add_data = plot_df[plot_df['additive_type'] == additive]
-        pure_data = plot_df[plot_df['additive_type'] == 'Pure']
+    # FIX: Only proceed if we have additives
+    if len(additives) > 0:
+        plot_data_exists = False
+        for additive in additives:
+            add_data = plot_df[plot_df['additive_type'] == additive]
+            pure_data = plot_df[plot_df['additive_type'] == 'Pure']
+            
+            if len(add_data) > 0 and len(pure_data) > 0:
+                # Calculate GB conductivity ratio
+                if 'sigma_gb_mS' in add_data.columns and 'sigma_gb_mS' in pure_data.columns:
+                    add_gb_mean = add_data['sigma_gb_mS'].mean()
+                    pure_gb_mean = pure_data['sigma_gb_mS'].mean()
+                    gb_ratio = add_gb_mean / pure_gb_mean if pure_gb_mean > 0 else np.nan
+                else:
+                    # Use total conductivity as proxy
+                    add_total_mean = add_data['sigma_total_mS'].mean()
+                    pure_total_mean = pure_data['sigma_total_mS'].mean()
+                    gb_ratio = add_total_mean / pure_total_mean if pure_total_mean > 0 else np.nan
+                
+                # Calculate densification boost
+                if 'density_percent' in add_data.columns and 'density_percent' in pure_data.columns:
+                    add_dens_mean = add_data['density_percent'].mean()
+                    pure_dens_mean = pure_data['density_percent'].mean()
+                    dens_boost = add_dens_mean - pure_dens_mean if not pd.isna(pure_dens_mean) else np.nan
+                else:
+                    dens_boost = np.nan
+                
+                # Get concentration info
+                add_conc = add_data['additive_concentration_wt'].mean() if 'additive_concentration_wt' in add_data.columns else 0
+                
+                if not np.isnan(gb_ratio) and not np.isnan(dens_boost):
+                    plot_data_exists = True
+                    color = SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')
+                    size = 100 + add_conc * 50 if not pd.isna(add_conc) else 100
+                    
+                    ax3.scatter(dens_boost, gb_ratio, s=size, c=[color], marker='o',
+                              edgecolors='black', linewidth=1.5, alpha=0.8, label=additive)
+                    ax3.annotate(f'{additive}\n({add_conc:.1f} wt%)', (dens_boost, gb_ratio), 
+                               fontsize=9, ha='center', va='bottom')
         
-        if len(add_data) > 0 and len(pure_data) > 0:
-            # Find matching compositions
-            add_avg_cond = add_data['sigma_total_mS'].mean()
-            pure_avg_cond = pure_data['sigma_total_mS'].mean()
-            ratio = add_avg_cond / pure_avg_cond if pure_avg_cond > 0 else np.nan
+        if plot_data_exists:
+            # Add reference lines
+            ax3.axhline(y=1.0, color='black', linestyle='--', linewidth=1, alpha=0.5, label='Equal conductivity')
+            ax3.axvline(x=0, color='black', linestyle='--', linewidth=1, alpha=0.5, label='No densification')
             
-            add_avg_dens = add_data['density_percent'].mean()
-            pure_avg_dens = pure_data['density_percent'].mean()
-            dens_boost = add_avg_dens - pure_avg_dens if not pd.isna(pure_avg_dens) else np.nan
+            # Add quadrants
+            ax3.axhspan(0, 1, xmin=0, xmax=1, alpha=0.1, color='red', label='Poisoning region')
+            ax3.axhspan(1, 2, xmin=0, xmax=1, alpha=0.1, color='green', label='Beneficial region')
             
-            if not np.isnan(ratio) and not np.isnan(dens_boost):
-                color = SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')
-                ax3.scatter(dens_boost, ratio, s=200, c=[color], marker='o', 
-                           edgecolors='black', linewidth=1.5, label=additive)
-                ax3.annotate(additive, (dens_boost, ratio), fontsize=9, ha='center', va='bottom')
-    
-    ax3.axhline(y=1.0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    ax3.axvline(x=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    ax3.set_xlabel('Densification Boost (Δρ, %)')
-    ax3.set_ylabel('σ_additive / σ_pure')
-    ax3.set_title('Trade-off: Densification vs Conductivity')
-    ax3.grid(True, alpha=0.3)
+            ax3.set_xlabel('Densification Boost (Δρ, %)')
+            ax3.set_ylabel('σ_gb(additive) / σ_gb(pure)')
+            ax3.set_title('Trade-off: Grain Boundary Conductivity vs Densification')
+            ax3.legend(loc='best')
+            ax3.grid(True, alpha=0.3)
+        else:
+            ax3.text(0.5, 0.5, 'Insufficient data for GB ratio vs densification analysis', 
+                    ha='center', va='center', transform=ax3.transAxes, fontsize=12)
+            ax3.set_title('Trade-off Analysis')
+    else:
+        ax3.text(0.5, 0.5, 'No additive data available for analysis', 
+                ha='center', va='center', transform=ax3.transAxes, fontsize=12)
+        ax3.set_title('Trade-off Analysis')
     
     # Panel 4: GB resistance fraction comparison
     ax4 = axes[1, 1]
+    # FIX: Check if GB resistance fraction data exists
     if 'gb_resistance_fraction' in plot_df.columns:
         gb_data = plot_df.dropna(subset=['gb_resistance_fraction', 'additive_type'])
         gb_pure = gb_data[gb_data['additive_type'] == 'Pure']['gb_resistance_fraction'].mean()
@@ -2479,14 +2498,15 @@ def plot_poisoning_analysis(df_long, temperature=600):
                 additives_gb.append(add_gb)
                 add_names_gb.append(add)
         
-        if gb_pure and additives_gb:
+        # FIX: Only create bar chart if we have data
+        if gb_pure is not None and not pd.isna(gb_pure) and additives_gb:
             x_pos = np.arange(len(additives_gb) + 1)
             means = [gb_pure] + additives_gb
             labels = ['Pure'] + add_names_gb
             colors = ['#10B981'] + [SINTERING_ADDITIVE_COLORS.get(a, '#6B7280') for a in add_names_gb]
             
-            bars = ax4.bar(x_pos, means, color=colors, edgecolor='black')
-            ax4.set_xticks(x_pos)
+            bars = ax4.bar(x_pos[:len(means)], means, color=colors, edgecolor='black')
+            ax4.set_xticks(x_pos[:len(means)])
             ax4.set_xticklabels(labels, rotation=45, ha='right')
             ax4.set_ylabel('Grain Boundary Resistance Fraction')
             ax4.set_title('GB Contribution to Total Resistance')
@@ -2495,16 +2515,19 @@ def plot_poisoning_analysis(df_long, temperature=600):
             for bar, val in zip(bars, means):
                 ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
                         f'{val:.2f}', ha='center', fontsize=8)
+        else:
+            ax4.text(0.5, 0.5, 'No GB resistance fraction data for comparison', 
+                    ha='center', va='center', transform=ax4.transAxes, fontsize=12)
+            ax4.set_title('GB Contribution Analysis')
     else:
         ax4.text(0.5, 0.5, 'No grain boundary resistance fraction data available',
-                ha='center', va='center', transform=ax4.transAxes)
+                ha='center', va='center', transform=ax4.transAxes, fontsize=12)
         ax4.set_title('GB Contribution Analysis')
     
     plt.suptitle('Poisoning Analysis: Densification vs Grain Boundary Blocking', fontsize=14, fontweight='bold')
     plt.tight_layout()
     
     return fig
-
 
 def plot_pure_vs_additive_matched_density(df_long, temperature=600):
     """
@@ -2789,32 +2812,6 @@ def plot_phase_space_3d(df_long, x_col, y_col, z_col, color_col, temperature,
                         filter_dict=None, show_scatter=True, show_surface=False):
     """
     Interactive 3D phase-space diagram using Plotly.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    x_col : str
-        X-axis column (Ce_ratio, wt%, T_sin, etc.)
-    y_col : str
-        Y-axis column
-    z_col : str
-        Z-axis column (usually conductivity)
-    color_col : str
-        Color column (additive_type, dopant, density, etc.)
-    temperature : int
-        Temperature in Celsius (if z_col contains conductivity)
-    filter_dict : dict
-        Dictionary of filters
-    show_scatter : bool
-        Show scatter points
-    show_surface : bool
-        Show interpolated surface
-    
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        Interactive 3D plot
     """
     # Apply filters
     plot_df = df_long.copy()
@@ -2832,10 +2829,13 @@ def plot_phase_space_3d(df_long, x_col, y_col, z_col, color_col, temperature,
     
     plot_df = plot_df.dropna(subset=[x_col, y_col, z_col])
     
+    # FIX: Check if we have enough data for 3D plot
     if len(plot_df) < 5:
         fig = go.Figure()
         fig.add_annotation(text=f'Insufficient data for 3D plot (need at least 5 points, have {len(plot_df)})',
-                          xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+                          xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+                          font=dict(size=14))
+        fig.update_layout(title='Insufficient Data for 3D Visualization')
         return fig
     
     # Prepare color mapping
@@ -2866,25 +2866,27 @@ def plot_phase_space_3d(df_long, x_col, y_col, z_col, color_col, temperature,
     # Create 3D scatter plot
     fig = go.Figure()
     
-    if show_scatter:
+    # FIX: Only add scatter if we have data
+    if show_scatter and len(plot_df) > 0:
         if color_col in plot_df.columns and not pd.api.types.is_numeric_dtype(plot_df[color_col]):
             # Separate traces for each category (for legend)
             for cat in plot_df[color_col].unique():
                 subset = plot_df[plot_df[color_col] == cat]
-                fig.add_trace(go.Scatter3d(
-                    x=subset[x_col], y=subset[y_col], z=subset[z_col],
-                    mode='markers',
-                    marker=dict(
-                        size=st.session_state.plot_settings.get('marker_size', 80) / 10,
-                        color=color_map.get(cat, '#6B7280'),
-                        opacity=st.session_state.plot_settings.get('bubble_alpha', 0.7),
-                        line=dict(color='black', width=0.5)
-                    ),
-                    name=str(cat),
-                    text=[f"{color_col}: {cat}<br>{x_col}: {x:.2f}<br>{y_col}: {y:.2f}<br>{z_col}: {z:.2f}" 
-                          for x, y, z in zip(subset[x_col], subset[y_col], subset[z_col])],
-                    hoverinfo='text'
-                ))
+                if len(subset) > 0:
+                    fig.add_trace(go.Scatter3d(
+                        x=subset[x_col], y=subset[y_col], z=subset[z_col],
+                        mode='markers',
+                        marker=dict(
+                            size=st.session_state.plot_settings.get('marker_size', 80) / 10,
+                            color=color_map.get(cat, '#6B7280'),
+                            opacity=st.session_state.plot_settings.get('bubble_alpha', 0.7),
+                            line=dict(color='black', width=0.5)
+                        ),
+                        name=str(cat),
+                        text=[f"{color_col}: {cat}<br>{x_col}: {x:.2f}<br>{y_col}: {y:.2f}<br>{z_col}: {z:.2f}" 
+                              for x, y, z in zip(subset[x_col], subset[y_col], subset[z_col])],
+                        hoverinfo='text'
+                    ))
         else:
             # Single trace with color scaling
             fig.add_trace(go.Scatter3d(
@@ -2914,13 +2916,15 @@ def plot_phase_space_3d(df_long, x_col, y_col, z_col, color_col, temperature,
             Zi = griddata((plot_df[x_col].values, plot_df[y_col].values), 
                          plot_df[z_col].values, (Xi, Yi), method='cubic')
             
-            fig.add_trace(go.Surface(
-                x=xi, y=yi, z=Zi,
-                colorscale='Viridis',
-                opacity=0.5,
-                showscale=False,
-                name='Interpolated surface'
-            ))
+            # FIX: Only add surface if we have valid data
+            if not np.all(np.isnan(Zi)):
+                fig.add_trace(go.Surface(
+                    x=xi, y=yi, z=Zi,
+                    colorscale='Viridis',
+                    opacity=0.5,
+                    showscale=False,
+                    name='Interpolated surface'
+                ))
         except:
             pass
     
@@ -2944,7 +2948,6 @@ def plot_phase_space_3d(df_long, x_col, y_col, z_col, color_col, temperature,
     
     return fig
 
-
 # ============================================================================
 # NEW FUNCTIONS FOR UMAP AND PCA BIPLOT
 # ============================================================================
@@ -2952,24 +2955,6 @@ def plot_phase_space_3d(df_long, x_col, y_col, z_col, color_col, temperature,
 def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=15, min_dist=0.1):
     """
     UMAP clustering for non-linear dimensionality reduction.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    feature_columns : list
-        Features to use for UMAP
-    temperature : int
-        Temperature in Celsius
-    n_neighbors : int
-        UMAP n_neighbors parameter
-    min_dist : float
-        UMAP min_dist parameter
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with UMAP plot
     """
     # Check if UMAP is available
     try:
@@ -2981,7 +2966,7 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     if not UMAP_AVAILABLE:
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.text(0.5, 0.5, 'UMAP not installed. Run: pip install umap-learn', 
-                ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('UMAP Not Available')
         return fig
     
@@ -2995,16 +2980,18 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     available_features = [f for f in feature_columns if f in plot_df.columns]
     if len(available_features) < 2:
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.text(0.5, 0.5, 'Need at least 2 features for UMAP', ha='center', va='center', transform=ax.transAxes)
+        ax.text(0.5, 0.5, 'Need at least 2 features for UMAP', 
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('Insufficient Features for UMAP')
         return fig
     
     agg_df = plot_df.groupby('sample_id')[available_features].mean().dropna()
     
+    # FIX: Check minimum samples for UMAP (need at least 5)
     if len(agg_df) < 5:
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.text(0.5, 0.5, f'Insufficient samples for UMAP (need at least 5, have {len(agg_df)})',
-                ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('Insufficient Samples for UMAP')
         return fig
     
@@ -3018,7 +3005,8 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
         X_umap = reducer.fit_transform(X_scaled)
     except Exception as e:
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.text(0.5, 0.5, f'UMAP failed: {str(e)}', ha='center', va='center', transform=ax.transAxes)
+        ax.text(0.5, 0.5, f'UMAP failed: {str(e)[:100]}', 
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('UMAP Error')
         return fig
     
@@ -3031,12 +3019,16 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     
     # Plot 1: Color by additive type
     unique_additives = additive_types.unique()
-    for additive in unique_additives:
-        mask = [additive_types[idx] == additive for idx in agg_df.index]
-        if any(mask):
-            ax1.scatter(X_umap[mask, 0], X_umap[mask, 1],
-                       c=[SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')],
-                       s=100, alpha=0.7, edgecolors='black', label=additive)
+    # FIX: Check if we have any valid additives
+    if len(unique_additives) > 0:
+        for additive in unique_additives:
+            mask = [additive_types[idx] == additive for idx in agg_df.index]
+            if any(mask):
+                ax1.scatter(X_umap[mask, 0], X_umap[mask, 1],
+                           c=[SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')],
+                           s=100, alpha=0.7, edgecolors='black', label=additive)
+    else:
+        ax1.scatter(X_umap[:, 0], X_umap[:, 1], c='gray', s=100, alpha=0.7, edgecolors='black')
     
     ax1.set_xlabel('UMAP 1')
     ax1.set_ylabel('UMAP 2')
@@ -3075,24 +3067,9 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     
     return fig
 
-
 def plot_pca_biplot(df_long, feature_columns, temperature=600):
     """
     PCA biplot with loading vectors.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    feature_columns : list
-        Features for PCA
-    temperature : int
-        Temperature in Celsius
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with PCA biplot
     """
     # Prepare data
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
@@ -3104,16 +3081,18 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     available_features = [f for f in feature_columns if f in plot_df.columns]
     if len(available_features) < 2:
         fig, ax = plt.subplots(figsize=(12, 10))
-        ax.text(0.5, 0.5, 'Need at least 2 features for PCA', ha='center', va='center', transform=ax.transAxes)
+        ax.text(0.5, 0.5, 'Need at least 2 features for PCA', 
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('Insufficient Features for PCA')
         return fig
     
     agg_df = plot_df.groupby('sample_id')[available_features].mean().dropna()
     
+    # FIX: Check minimum samples for PCA (need at least 3)
     if len(agg_df) < 3:
         fig, ax = plt.subplots(figsize=(12, 10))
         ax.text(0.5, 0.5, f'Insufficient samples for PCA (need at least 3, have {len(agg_df)})',
-                ha='center', va='center', transform=ax.transAxes)
+                ha='center', va='center', transform=ax.transAxes, fontsize=12)
         ax.set_title('Insufficient Samples for PCA')
         return fig
     
@@ -3135,12 +3114,16 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     additive_types = plot_df.groupby('sample_id')['additive_type'].first()
     unique_additives = additive_types.unique()
     
-    for additive in unique_additives:
-        mask = [additive_types[idx] == additive for idx in agg_df.index]
-        if any(mask):
-            ax.scatter(X_pca[mask, 0], X_pca[mask, 1],
-                      c=[SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')],
-                      s=100, alpha=0.7, edgecolors='black', label=additive)
+    # FIX: Check if we have any valid additives
+    if len(unique_additives) > 0:
+        for additive in unique_additives:
+            mask = [additive_types[idx] == additive for idx in agg_df.index]
+            if any(mask):
+                ax.scatter(X_pca[mask, 0], X_pca[mask, 1],
+                          c=[SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')],
+                          s=100, alpha=0.7, edgecolors='black', label=additive)
+    else:
+        ax.scatter(X_pca[:, 0], X_pca[:, 1], c='gray', s=100, alpha=0.7, edgecolors='black')
     
     # Plot loading vectors
     for i, feature in enumerate(available_features):
@@ -3167,7 +3150,6 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     
     plt.tight_layout()
     return fig
-
 
 # ============================================================================
 # NEW FUNCTIONS FOR ADDITIVE INCORPORATION ANALYSIS
