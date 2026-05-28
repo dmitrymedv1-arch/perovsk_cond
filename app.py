@@ -33,7 +33,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import make_pipeline
 from scipy.spatial import cKDTree
 import time
-import umap
+import umap.umap_ as umap
 from sklearn.decomposition import KernelPCA
 from scipy.spatial.distance import pdist, squareform
 warnings.filterwarnings('ignore')
