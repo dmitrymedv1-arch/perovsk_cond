@@ -33,7 +33,12 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import make_pipeline
 from scipy.spatial import cKDTree
 import time
-import umap.umap_ as umap
+try:
+    import umap
+    UMAP_AVAILABLE = True
+except ImportError:
+    UMAP_AVAILABLE = False
+    print("UMAP not available. Install with: pip install umap-learn")
 from sklearn.decomposition import KernelPCA
 from scipy.spatial.distance import pdist, squareform
 warnings.filterwarnings('ignore')
@@ -2000,12 +2005,17 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.text(0.5, 0.5, f'Insufficient data for bubble diagram (need at least 3 points, have {len(plot_df)})',
                 ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Insufficient Data')
         return fig
     
     fig, ax = plt.subplots(figsize=(12, 8))
     
+    settings = st.session_state.plot_settings
+    bubble_alpha = settings.get('bubble_alpha', 0.7)
+    marker_size_setting = settings.get('marker_size', 80)
+    
     # Prepare bubble sizes
-    if size_col in plot_df.columns and plot_df[size_col].notna().any():
+    if size_col is not None and size_col in plot_df.columns and plot_df[size_col].notna().any():
         size_min = plot_df[size_col].min()
         size_max = plot_df[size_col].max()
         if size_max > size_min:
@@ -2016,11 +2026,7 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
         sizes = 100
     
     # Prepare colors
-    settings = st.session_state.plot_settings
-    marker_size_setting = settings.get('marker_size', 80)
-    bubble_alpha = settings.get('bubble_alpha', 0.7)
-    
-    if color_col in plot_df.columns and plot_df[color_col].notna().any():
+    if color_col is not None and color_col in plot_df.columns and plot_df[color_col].notna().any():
         # Numeric color
         if pd.api.types.is_numeric_dtype(plot_df[color_col]):
             scatter = ax.scatter(plot_df[x_col], plot_df[y_col],
@@ -2031,35 +2037,42 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
             cbar.set_label(color_col.replace('_', ' ').title())
         else:
             # Categorical color
-            for cat_val in plot_df[color_col].unique():
+            unique_cats = plot_df[color_col].unique()
+            for cat_val in unique_cats:
                 subset = plot_df[plot_df[color_col] == cat_val]
-                if color_col == 'additive_type':
-                    color = SINTERING_ADDITIVE_COLORS.get(cat_val, SINTERING_ADDITIVE_COLORS['default'])
-                elif color_col == 'dopant':
-                    color = DOPANT_COLORS.get(cat_val, DOPANT_COLORS['default'])
-                else:
-                    color = '#3B82F6'
-                ax.scatter(subset[x_col], subset[y_col],
-                          s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
-                          c=[color], label=cat_val, alpha=bubble_alpha,
-                          edgecolors='black', linewidth=0.5)
-            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                if len(subset) > 0:
+                    if color_col == 'additive_type':
+                        color = SINTERING_ADDITIVE_COLORS.get(cat_val, SINTERING_ADDITIVE_COLORS['default'])
+                    elif color_col == 'dopant':
+                        color = DOPANT_COLORS.get(cat_val, DOPANT_COLORS['default'])
+                    else:
+                        color = '#3B82F6'
+                    ax.scatter(subset[x_col], subset[y_col],
+                              s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                              c=[color], label=str(cat_val), alpha=bubble_alpha,
+                              edgecolors='black', linewidth=0.5)
+            if len(unique_cats) > 0:
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     else:
         # Default: group by additive type
-        for additive in plot_df['additive_type'].unique():
+        unique_additives = plot_df['additive_type'].unique()
+        for additive in unique_additives:
             subset = plot_df[plot_df['additive_type'] == additive]
-            color = SINTERING_ADDITIVE_COLORS.get(additive, SINTERING_ADDITIVE_COLORS['default'])
-            ax.scatter(subset[x_col], subset[y_col],
-                      s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
-                      c=[color], label=additive, alpha=bubble_alpha,
-                      edgecolors='black', linewidth=0.5)
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            if len(subset) > 0:
+                color = SINTERING_ADDITIVE_COLORS.get(additive, SINTERING_ADDITIVE_COLORS['default'])
+                ax.scatter(subset[x_col], subset[y_col],
+                          s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                          c=[color], label=additive, alpha=bubble_alpha,
+                          edgecolors='black', linewidth=0.5)
+        if len(unique_additives) > 0:
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     
     # Add trend lines
     if show_trend:
-        if color_col in plot_df.columns and not pd.api.types.is_numeric_dtype(plot_df[color_col]):
+        if color_col is not None and color_col in plot_df.columns and not pd.api.types.is_numeric_dtype(plot_df[color_col]):
             # Trend per category
-            for cat_val in plot_df[color_col].unique():
+            unique_cats = plot_df[color_col].unique()
+            for cat_val in unique_cats:
                 subset = plot_df[plot_df[color_col] == cat_val]
                 if len(subset) >= 3:
                     try:
@@ -2067,7 +2080,7 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
                         x_trend = np.linspace(subset[x_col].min(), subset[x_col].max(), 50)
                         ax.plot(x_trend, np.polyval(z, x_trend), '--',
                                linewidth=1.5, alpha=0.5)
-                    except:
+                    except Exception:
                         pass
         else:
             # Single trend line for all data
@@ -2077,12 +2090,12 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
                     x_trend = np.linspace(plot_df[x_col].min(), plot_df[x_col].max(), 50)
                     ax.plot(x_trend, np.polyval(z, x_trend), 'k--',
                            linewidth=1.5, alpha=0.5, label='Trend line')
-                except:
+                except Exception:
                     pass
     
     # Add legend for bubble size
     from matplotlib.lines import Line2D
-    if size_col in plot_df.columns and plot_df[size_col].notna().any():
+    if size_col is not None and size_col in plot_df.columns and plot_df[size_col].notna().any():
         size_quantiles = plot_df[size_col].quantile([0.25, 0.5, 0.75])
         legend_elements = [
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
@@ -2101,7 +2114,13 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
     title = f'Bubble Diagram: {y_col.replace("_", " ").title()} vs {x_col.replace("_", " ").title()}'
     if 'sigma' in y_col:
         title += f' at {temperature}°C'
-    title += f'\nSize = {size_col.replace("_", " ").title()}, Color = {color_col.replace("_", " ").title()}'
+    if size_col is not None and color_col is not None:
+        title += f'\nSize = {size_col.replace("_", " ").title()}, Color = {color_col.replace("_", " ").title()}'
+    elif size_col is not None:
+        title += f'\nSize = {size_col.replace("_", " ").title()}'
+    elif color_col is not None:
+        title += f'\nColor = {color_col.replace("_", " ").title()}'
+    
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     
@@ -2112,20 +2131,6 @@ def plot_bubble_diagram(df_long, x_col, y_col, size_col, color_col, temperature,
 def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None):
     """
     Multi-panel bubble analysis for comprehensive understanding.
-    
-    Parameters
-    ----------
-    df_long : pandas.DataFrame
-        Long format data
-    temperature : int
-        Temperature in Celsius
-    filter_dict : dict
-        Dictionary of filters
-    
-    Returns
-    -------
-    matplotlib.figure.Figure
-        Figure with multiple subplots
     """
     # Apply filters
     plot_df = df_long.copy()
@@ -2143,12 +2148,12 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     
     settings = st.session_state.plot_settings
     bubble_alpha = settings.get('bubble_alpha', 0.7)
-    marker_size = settings.get('marker_size', 80)
     
     # Panel 1: Conductivity vs Additive Concentration
     ax1 = axes[0, 0]
-    if 'additive_concentration_wt' in plot_df.columns and len(plot_df[plot_df['additive_concentration_wt'] > 0]) > 0:
-        panel_df = plot_df[plot_df['additive_concentration_wt'] > 0]
+    additive_conc_data = plot_df[plot_df['additive_concentration_wt'] > 0] if 'additive_concentration_wt' in plot_df.columns else pd.DataFrame()
+    if len(additive_conc_data) > 0:
+        panel_df = additive_conc_data
         if 'grain_size_um' in panel_df.columns and panel_df['grain_size_um'].notna().any():
             size_min = panel_df['grain_size_um'].min()
             size_max = panel_df['grain_size_um'].max()
@@ -2165,12 +2170,16 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
                                  cmap='viridis', alpha=bubble_alpha, edgecolors='black')
             plt.colorbar(scatter, ax=ax1, label='Density (%)')
         else:
-            for additive in panel_df['additive_type'].unique():
+            # Only add legend if there are actual categories
+            unique_additives = panel_df['additive_type'].unique()
+            for additive in unique_additives:
                 subset = panel_df[panel_df['additive_type'] == additive]
-                color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-                ax1.scatter(subset['additive_concentration_wt'], subset['sigma_total_mS'],
-                           s=100, c=[color], label=additive, alpha=bubble_alpha, edgecolors='black')
-            ax1.legend()
+                if len(subset) > 0:
+                    color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
+                    ax1.scatter(subset['additive_concentration_wt'], subset['sigma_total_mS'],
+                               s=100, c=[color], label=additive, alpha=bubble_alpha, edgecolors='black')
+            if len(unique_additives) > 0:
+                ax1.legend()
         
         ax1.set_xlabel('Additive Concentration (wt%)')
         ax1.set_ylabel(f'σ at {temperature}°C (mS/cm)')
@@ -2182,8 +2191,9 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     
     # Panel 2: Conductivity vs Tolerance Factor
     ax2 = axes[0, 1]
-    if 'tolerance_factor' in plot_df.columns and len(plot_df.dropna(subset=['tolerance_factor'])) > 0:
-        panel_df = plot_df.dropna(subset=['tolerance_factor'])
+    tol_data = plot_df.dropna(subset=['tolerance_factor']) if 'tolerance_factor' in plot_df.columns else pd.DataFrame()
+    if len(tol_data) > 0:
+        panel_df = tol_data
         if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
             size_min = panel_df['density_percent'].min()
             size_max = panel_df['density_percent'].max()
@@ -2194,19 +2204,22 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
         else:
             sizes = 100
         
-        for additive in panel_df['additive_type'].unique():
+        unique_additives = panel_df['additive_type'].unique()
+        for additive in unique_additives:
             subset = panel_df[panel_df['additive_type'] == additive]
-            color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
-            ax2.scatter(subset['tolerance_factor'], subset['sigma_total_mS'],
-                       s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
-                       c=[color], label=additive, alpha=bubble_alpha, edgecolors='black')
+            if len(subset) > 0:
+                color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
+                ax2.scatter(subset['tolerance_factor'], subset['sigma_total_mS'],
+                           s=sizes if not isinstance(sizes, pd.Series) else sizes[subset.index],
+                           c=[color], label=additive, alpha=bubble_alpha, edgecolors='black')
         
         ax2.axvline(x=1.0, color='red', linestyle='--', alpha=0.5)
         ax2.axvspan(0.96, 1.04, alpha=0.15, color='green')
         ax2.set_xlabel('Tolerance Factor (t)')
         ax2.set_ylabel(f'σ at {temperature}°C (mS/cm)')
         ax2.set_title('Conductivity vs Structural Stability')
-        ax2.legend(loc='best')
+        if len(unique_additives) > 0:
+            ax2.legend(loc='best')
         ax2.grid(True, alpha=0.3)
     else:
         ax2.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax2.transAxes)
@@ -2214,8 +2227,9 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     
     # Panel 3: Conductivity vs Grain Size
     ax3 = axes[1, 0]
-    if 'grain_size_um' in plot_df.columns and len(plot_df.dropna(subset=['grain_size_um'])) > 0:
-        panel_df = plot_df.dropna(subset=['grain_size_um'])
+    grain_data = plot_df.dropna(subset=['grain_size_um']) if 'grain_size_um' in plot_df.columns else pd.DataFrame()
+    if len(grain_data) > 0:
+        panel_df = grain_data
         if 'density_percent' in panel_df.columns and panel_df['density_percent'].notna().any():
             size_min = panel_df['density_percent'].min()
             size_max = panel_df['density_percent'].max()
@@ -2226,18 +2240,20 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
         else:
             sizes = 100
         
-        for additive in panel_df['additive_type'].unique():
+        unique_additives = panel_df['additive_type'].unique()
+        for additive in unique_additives:
             subset = panel_df[panel_df['additive_type'] == additive]
             if len(subset) > 0:
                 color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
                 ax3.scatter(subset['grain_size_um'], subset['sigma_total_mS'],
-                           s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                           s=sizes if not isinstance(sizes, pd.Series) else sizes[subset.index],
                            c=[color], label=additive, alpha=bubble_alpha, edgecolors='black')
         
         ax3.set_xlabel('Grain Size (μm)')
         ax3.set_ylabel(f'σ at {temperature}°C (mS/cm)')
         ax3.set_title('Microstructural Effect (Size = Density)')
-        ax3.legend(loc='best')
+        if len(unique_additives) > 0:
+            ax3.legend(loc='best')
         ax3.grid(True, alpha=0.3)
     else:
         ax3.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax3.transAxes)
@@ -2245,8 +2261,9 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
     
     # Panel 4: Conductivity vs Density
     ax4 = axes[1, 1]
-    if 'density_percent' in plot_df.columns and len(plot_df.dropna(subset=['density_percent'])) > 0:
-        panel_df = plot_df.dropna(subset=['density_percent'])
+    density_data = plot_df.dropna(subset=['density_percent']) if 'density_percent' in plot_df.columns else pd.DataFrame()
+    if len(density_data) > 0:
+        panel_df = density_data
         if 'grain_size_um' in panel_df.columns and panel_df['grain_size_um'].notna().any():
             size_min = panel_df['grain_size_um'].min()
             size_max = panel_df['grain_size_um'].max()
@@ -2257,18 +2274,20 @@ def plot_multi_panel_bubble_analysis(df_long, temperature=600, filter_dict=None)
         else:
             sizes = 100
         
-        for additive in panel_df['additive_type'].unique():
+        unique_additives = panel_df['additive_type'].unique()
+        for additive in unique_additives:
             subset = panel_df[panel_df['additive_type'] == additive]
             if len(subset) > 0:
                 color = SINTERING_ADDITIVE_COLORS.get(additive, 'gray')
                 ax4.scatter(subset['density_percent'], subset['sigma_total_mS'],
-                           s=sizes[subset.index] if isinstance(sizes, pd.Series) else sizes,
+                           s=sizes if not isinstance(sizes, pd.Series) else sizes[subset.index],
                            c=[color], label=additive, alpha=bubble_alpha, edgecolors='black')
         
         ax4.set_xlabel('Relative Density (%)')
         ax4.set_ylabel(f'σ at {temperature}°C (mS/cm)')
         ax4.set_title('Densification Effect (Size = Grain Size)')
-        ax4.legend(loc='best')
+        if len(unique_additives) > 0:
+            ax4.legend(loc='best')
         ax4.grid(True, alpha=0.3)
     else:
         ax4.text(0.5, 0.5, 'Insufficient data', ha='center', va='center', transform=ax4.transAxes)
@@ -2952,6 +2971,20 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     matplotlib.figure.Figure
         Figure with UMAP plot
     """
+    # Check if UMAP is available
+    try:
+        import umap
+        UMAP_AVAILABLE = True
+    except ImportError:
+        UMAP_AVAILABLE = False
+    
+    if not UMAP_AVAILABLE:
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.text(0.5, 0.5, 'UMAP not installed. Run: pip install umap-learn', 
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('UMAP Not Available')
+        return fig
+    
     # Prepare data
     plot_df = df_long[df_long['temperature_C'] == temperature].copy()
     
@@ -2962,7 +2995,8 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     available_features = [f for f in feature_columns if f in plot_df.columns]
     if len(available_features) < 2:
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.text(0.5, 0.5, 'Need at least 2 features for UMAP', ha='center', va='center')
+        ax.text(0.5, 0.5, 'Need at least 2 features for UMAP', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Insufficient Features for UMAP')
         return fig
     
     agg_df = plot_df.groupby('sample_id')[available_features].mean().dropna()
@@ -2970,7 +3004,8 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     if len(agg_df) < 5:
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.text(0.5, 0.5, f'Insufficient samples for UMAP (need at least 5, have {len(agg_df)})',
-                ha='center', va='center')
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Insufficient Samples for UMAP')
         return fig
     
     # Standardize
@@ -2983,7 +3018,8 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
         X_umap = reducer.fit_transform(X_scaled)
     except Exception as e:
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.text(0.5, 0.5, f'UMAP failed: {str(e)}', ha='center', va='center')
+        ax.text(0.5, 0.5, f'UMAP failed: {str(e)}', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('UMAP Error')
         return fig
     
     # Get metadata
@@ -2994,29 +3030,41 @@ def plot_umap_clustering(df_long, feature_columns, temperature=600, n_neighbors=
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7))
     
     # Plot 1: Color by additive type
-    for additive in additive_types.unique():
+    unique_additives = additive_types.unique()
+    for additive in unique_additives:
         mask = [additive_types[idx] == additive for idx in agg_df.index]
         if any(mask):
             ax1.scatter(X_umap[mask, 0], X_umap[mask, 1],
                        c=[SINTERING_ADDITIVE_COLORS.get(additive, '#6B7280')],
                        s=100, alpha=0.7, edgecolors='black', label=additive)
+    
     ax1.set_xlabel('UMAP 1')
     ax1.set_ylabel('UMAP 2')
     ax1.set_title('UMAP Clustering: Color by Additive Type')
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    if len(unique_additives) > 0:
+        ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax1.grid(True, alpha=0.3)
     
     # Plot 2: Color by conductivity
     valid_cond = conductivities.dropna()
     if len(valid_cond) > 0:
-        umap_indices = [i for i, idx in enumerate(agg_df.index) if idx in valid_cond.index]
-        umap_cond = [valid_cond[idx] for idx in agg_df.index if idx in valid_cond.index]
-        scatter = ax2.scatter(X_umap[umap_indices, 0], X_umap[umap_indices, 1],
-                             c=umap_cond, cmap='viridis', s=100, alpha=0.7, edgecolors='black')
-        cbar = plt.colorbar(scatter, ax=ax2)
-        cbar.set_label(f'σ total at {temperature}°C (mS/cm)')
+        umap_indices = []
+        umap_cond = []
+        for i, idx in enumerate(agg_df.index):
+            if idx in valid_cond.index:
+                umap_indices.append(i)
+                umap_cond.append(valid_cond[idx])
+        
+        if len(umap_indices) > 0:
+            scatter = ax2.scatter(X_umap[umap_indices, 0], X_umap[umap_indices, 1],
+                                 c=umap_cond, cmap='viridis', s=100, alpha=0.7, edgecolors='black')
+            cbar = plt.colorbar(scatter, ax=ax2)
+            cbar.set_label(f'σ total at {temperature}°C (mS/cm)')
+        else:
+            ax2.scatter(X_umap[:, 0], X_umap[:, 1], c='gray', s=100, alpha=0.7, edgecolors='black')
     else:
         ax2.scatter(X_umap[:, 0], X_umap[:, 1], c='gray', s=100, alpha=0.7, edgecolors='black')
+    
     ax2.set_xlabel('UMAP 1')
     ax2.set_ylabel('UMAP 2')
     ax2.set_title('UMAP Clustering: Color by Conductivity')
@@ -3056,7 +3104,8 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     available_features = [f for f in feature_columns if f in plot_df.columns]
     if len(available_features) < 2:
         fig, ax = plt.subplots(figsize=(12, 10))
-        ax.text(0.5, 0.5, 'Need at least 2 features for PCA', ha='center', va='center')
+        ax.text(0.5, 0.5, 'Need at least 2 features for PCA', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Insufficient Features for PCA')
         return fig
     
     agg_df = plot_df.groupby('sample_id')[available_features].mean().dropna()
@@ -3064,7 +3113,8 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     if len(agg_df) < 3:
         fig, ax = plt.subplots(figsize=(12, 10))
         ax.text(0.5, 0.5, f'Insufficient samples for PCA (need at least 3, have {len(agg_df)})',
-                ha='center', va='center')
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Insufficient Samples for PCA')
         return fig
     
     # Standardize
@@ -3083,7 +3133,9 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     
     # Plot points
     additive_types = plot_df.groupby('sample_id')['additive_type'].first()
-    for additive in additive_types.unique():
+    unique_additives = additive_types.unique()
+    
+    for additive in unique_additives:
         mask = [additive_types[idx] == additive for idx in agg_df.index]
         if any(mask):
             ax.scatter(X_pca[mask, 0], X_pca[mask, 1],
@@ -3106,7 +3158,10 @@ def plot_pca_biplot(df_long, feature_columns, temperature=600):
     ax.set_title('PCA Biplot: Principal Component Analysis with Loading Vectors')
     ax.axhline(y=0, color='gray', linestyle='-', linewidth=0.5, alpha=0.5)
     ax.axvline(x=0, color='gray', linestyle='-', linewidth=0.5, alpha=0.5)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    if len(unique_additives) > 0:
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
     ax.grid(True, alpha=0.3)
     ax.set_aspect('equal')
     
