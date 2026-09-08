@@ -259,7 +259,9 @@ def calculate_delta_descriptors(df):
     # Group by References
     for ref, ref_group in df.groupby('References'):
         # Find Pure samples in this group
-        pure_mask = ref_group['Sintering additive'].str.lower() == 'pure'
+        pure_mask = ref_group['Sintering additive'].apply(
+            lambda x: pd.notna(x) and x.lower() == 'pure'
+        )
         pure_samples = ref_group[pure_mask]
         
         if len(pure_samples) == 0:
@@ -272,7 +274,7 @@ def calculate_delta_descriptors(df):
             
             # Find additives with same composition
             for add_idx, add_row in ref_group.iterrows():
-                if add_row['Sintering additive'].str.lower() == 'pure':
+                if pd.notna(add_row['Sintering additive']) and add_row['Sintering additive'].lower() == 'pure':
                     continue
                 
                 # Check if composition matches
@@ -1156,9 +1158,13 @@ def main():
         # Apply data type filter
         df_plot_type = df_filtered.copy()
         if data_type == 'Pure only':
-            df_plot_type = df_plot_type[df_plot_type['Sintering additive'].str.lower() == 'pure']
+            df_plot_type = df_plot_type[df_plot_type['Sintering additive'].apply(
+                lambda x: pd.notna(x) and x.lower() == 'pure'
+            )]
         elif data_type == 'Additives only':
-            df_plot_type = df_plot_type[df_plot_type['Sintering additive'].str.lower() != 'pure']
+            df_plot_type = df_plot_type[df_plot_type['Sintering additive'].apply(
+                lambda x: pd.notna(x) and x.lower() != 'pure'
+            )]
         
         # Outlier removal controls for X and Y
         col1, col2 = st.columns(2)
