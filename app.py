@@ -15,6 +15,7 @@ from scipy.interpolate import griddata
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib
+import seaborn as sns
 matplotlib.use('Agg')
 
 warnings.filterwarnings('ignore')
@@ -236,6 +237,106 @@ def calculate_ea(row):
         return np.nan
 
 # ============================================
+# FUNCTION FOR DELTA DESCRIPTORS CALCULATION
+# ============================================
+
+def calculate_delta_descriptors(df):
+    """
+    Calculate Δρ, Δd, ΔT, and Δσ for each additive compared to Pure
+    Grouped by References and chemical composition
+    """
+    delta_rows = []
+    
+    # Define columns that define chemical composition
+    composition_cols = ['A cation', 'B1 cation', 'B2 cation', 'B2_cont', 'dopant', 'dop_cont']
+    
+    # Define temperature columns
+    temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
+                 'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
+                 'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
+                 'σ total, 800', 'σ total, 850', 'σ total, 900']
+    
+    # Group by References
+    for ref, ref_group in df.groupby('References'):
+        # Find Pure samples in this group
+        pure_mask = ref_group['Sintering additive'].str.lower() == 'pure'
+        pure_samples = ref_group[pure_mask]
+        
+        if len(pure_samples) == 0:
+            continue
+        
+        # For each pure sample, find matching additives
+        for pure_idx, pure_row in pure_samples.iterrows():
+            # Get composition of pure sample
+            pure_composition = {col: pure_row[col] for col in composition_cols}
+            
+            # Find additives with same composition
+            for add_idx, add_row in ref_group.iterrows():
+                if add_row['Sintering additive'].str.lower() == 'pure':
+                    continue
+                
+                # Check if composition matches
+                composition_match = True
+                for col in composition_cols:
+                    if pd.isna(pure_row[col]) and pd.isna(add_row[col]):
+                        continue
+                    if pure_row[col] != add_row[col]:
+                        composition_match = False
+                        break
+                
+                if not composition_match:
+                    continue
+                
+                # Calculate delta values
+                delta = {
+                    'References': ref,
+                    'Sintering additive': add_row['Sintering additive'],
+                    'x, wt%': add_row['x, wt%'] if pd.notna(add_row['x, wt%']) else np.nan,
+                    'T_sin_Pure': pure_row['T sin'] if pd.notna(pure_row['T sin']) else np.nan,
+                    'T_sin_Additive': add_row['T sin'] if pd.notna(add_row['T sin']) else np.nan,
+                }
+                
+                # ΔT
+                if pd.notna(pure_row['T sin']) and pd.notna(add_row['T sin']):
+                    delta['ΔT'] = pure_row['T sin'] - add_row['T sin']
+                else:
+                    delta['ΔT'] = np.nan
+                
+                # Δρ
+                if pd.notna(pure_row['ρ, %']) and pd.notna(add_row['ρ, %']):
+                    delta['Δρ'] = add_row['ρ, %'] - pure_row['ρ, %']
+                    delta['Δρ_rel'] = (delta['Δρ'] / pure_row['ρ, %']) * 100
+                else:
+                    delta['Δρ'] = np.nan
+                    delta['Δρ_rel'] = np.nan
+                
+                # Δd
+                if pd.notna(pure_row['d, mkm']) and pd.notna(add_row['d, mkm']):
+                    delta['Δd'] = add_row['d, mkm'] - pure_row['d, mkm']
+                    delta['Δd_rel'] = (delta['Δd'] / pure_row['d, mkm']) * 100
+                else:
+                    delta['Δd'] = np.nan
+                    delta['Δd_rel'] = np.nan
+                
+                # Δσ for each temperature
+                for temp_col in temp_cols:
+                    if temp_col in pure_row.index and temp_col in add_row.index:
+                        if pd.notna(pure_row[temp_col]) and pd.notna(add_row[temp_col]):
+                            delta[f'Δ{temp_col}'] = add_row[temp_col] - pure_row[temp_col]
+                        else:
+                            delta[f'Δ{temp_col}'] = np.nan
+                    else:
+                        delta[f'Δ{temp_col}'] = np.nan
+                
+                delta_rows.append(delta)
+    
+    if len(delta_rows) == 0:
+        return pd.DataFrame()
+    
+    delta_df = pd.DataFrame(delta_rows)
+    return delta_df
+
+# ============================================
 # FUNCTION FOR OUTLIER REMOVAL
 # ============================================
 
@@ -250,13 +351,11 @@ def remove_outliers(df, col, n):
     if col not in df.columns:
         return df
     
-    # Get unique values sorted
     unique_vals = sorted(df[col].dropna().unique())
     
     if len(unique_vals) <= 2 * n:
         return df
     
-    # Determine which values to remove from the low end
     low_vals_to_remove = []
     for i in range(min(n, len(unique_vals))):
         val = unique_vals[i]
@@ -266,7 +365,6 @@ def remove_outliers(df, col, n):
         else:
             break
     
-    # Determine which values to remove from the high end
     high_vals_to_remove = []
     for i in range(min(n, len(unique_vals))):
         val = unique_vals[-(i+1)]
@@ -276,7 +374,6 @@ def remove_outliers(df, col, n):
         else:
             break
     
-    # Create filter mask
     mask = pd.Series(True, index=df.index)
     if low_vals_to_remove:
         mask = mask & ~df[col].isin(low_vals_to_remove)
@@ -295,13 +392,10 @@ def get_filter_markers(df, active_filters_count):
     Returns: marker_style (string or dict), show_legend (bool)
     """
     if active_filters_count == 1:
-        # Find which filter is active
         for filter_name, marker_dict in MARKER_MAP.items():
             if filter_name in df.columns:
-                # Check if this filter has more than one unique value
                 unique_vals = df[filter_name].dropna().unique()
                 if len(unique_vals) > 1:
-                    # Return the marker dictionary for this filter
                     return marker_dict, True
         return 'o', False
     else:
@@ -356,7 +450,6 @@ def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
     fig, ax = plt.subplots(figsize=(8, 6))
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
-        # Use different markers for each category
         categories = plot_data[filter_name].unique()
         for cat in categories:
             mask = plot_data[filter_name] == cat
@@ -366,7 +459,6 @@ def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
                           s=50, marker=marker, edgecolors='black', 
                           linewidth=0.5, alpha=0.8, label=cat)
         
-        # Create colorbar from all data
         scatter = ax.scatter(x, y, c=z, cmap=palette, s=50, 
                             edgecolors='black', linewidth=0.5, alpha=0.8, visible=False)
         cbar = plt.colorbar(scatter, ax=ax)
@@ -449,17 +541,14 @@ def create_contour_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
-    # Create filled contour with smooth color transition
     contour = ax.contourf(xi, yi, zi, levels=30, cmap=palette, alpha=0.85)
     
-    # Add contour lines if requested
     if show_contour_lines:
         contour_lines = ax.contour(xi, yi, zi, levels=15, colors='black', 
                                    linewidths=0.5, alpha=0.4)
         if show_contour_labels:
             ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.2f')
     
-    # Plot original data points
     ax.scatter(x, y, color='red', s=30, edgecolors='white', 
                linewidth=1, alpha=0.7, label='Data points')
     
@@ -622,11 +711,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
-    # Import here to avoid issues
     import matplotlib.lines as mlines
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
-        # Use different markers for each category
         categories = plot_data[filter_name].unique()
         for cat in categories:
             mask = plot_data[filter_name] == cat
@@ -637,7 +724,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           marker=marker, alpha=0.7, edgecolors='black', 
                           linewidth=0.5, label=cat)
         
-        # Create colorbar from all data
         scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
                             cmap=palette, alpha=0.7, edgecolors='black', 
                             linewidth=0.5, visible=False)
@@ -649,10 +735,8 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Get existing legend handles and labels from the scatter plot
         handles, labels = ax.get_legend_handles_labels()
         
-        # Add size legend entries
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -663,7 +747,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
-        # Add size entries to existing handles and labels
         for val, size in zip(size_legend_values, size_legend_sizes):
             handles.append(mlines.Line2D([0], [0], marker='o', color='w',
                           label=f'Size: {val:.2f}',
@@ -672,7 +755,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           markeredgecolor='black'))
             labels.append(f'Size: {val:.2f}')
         
-        # Create combined legend WITHOUT title
         ax.legend(handles, labels, title='',
                   loc='upper right', frameon=True, framealpha=0.9)
         
@@ -689,7 +771,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Add size legend only
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -715,6 +796,71 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
     ax.grid(True, alpha=0.3, linestyle='--')
     
+    plt.tight_layout()
+    return fig
+
+# ============================================
+# FUNCTION FOR CORRELATION MATRIX
+# ============================================
+
+def create_correlation_matrix(df, selected_temp, palette):
+    """
+    Create correlation matrix heatmap for selected variables
+    """
+    # Define columns for correlation
+    corr_cols = ['dop_cont', 'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
+                 'molar_mass', 'x_B1', 'x_B2', 'x_dop']
+    
+    # Add microstructural descriptors if they exist
+    micro_cols = ['ρ, %', 'd, mkm', 'porosity', 'grain_boundary_area']
+    for col in micro_cols:
+        if col in df.columns:
+            corr_cols.append(col)
+    
+    # Add delta descriptors if they exist
+    delta_cols = ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel']
+    for col in delta_cols:
+        if col in df.columns:
+            corr_cols.append(col)
+    
+    # Add x, wt% if it exists
+    if 'x, wt%' in df.columns:
+        corr_cols.append('x, wt%')
+    
+    # Add conductivity at selected temperature
+    if selected_temp in df.columns:
+        corr_cols.append(selected_temp)
+    
+    # Add Ea if it exists
+    if 'Ea_final' in df.columns:
+        corr_cols.append('Ea_final')
+    
+    # Filter to only columns that exist in df
+    corr_cols = [col for col in corr_cols if col in df.columns]
+    
+    if len(corr_cols) < 2:
+        st.warning("Not enough numerical columns for correlation matrix")
+        return None
+    
+    # Calculate correlation matrix
+    corr_df = df[corr_cols].dropna()
+    
+    if len(corr_df) < 3:
+        st.warning("Not enough data for correlation matrix (need at least 3 rows)")
+        return None
+    
+    corr_matrix = corr_df.corr()
+    
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=(12, 10))
+    
+    # Use seaborn for nicer heatmap
+    sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap=palette,
+                vmin=-1, vmax=1, center=0, square=True,
+                linewidths=0.5, cbar_kws={"shrink": 0.8},
+                annot_kws={"size": 8}, ax=ax)
+    
+    ax.set_title('')
     plt.tight_layout()
     return fig
 
@@ -803,6 +949,24 @@ def main():
     st.dataframe(df[['References', 'tolerance_factor', 'chi_B_avg', 
                     'chi_ratio', 'molar_mass', 'porosity', 
                     'grain_boundary_area', 'Ea_final']].head(10))
+    
+    # ============================================
+    # DELTA DESCRIPTORS CALCULATION
+    # ============================================
+    st.markdown("---")
+    st.header("📊 Delta Descriptors Calculation")
+    
+    with st.spinner("Calculating delta descriptors (Δρ, Δd, ΔT, Δσ)..."):
+        delta_df = calculate_delta_descriptors(df)
+        
+        if len(delta_df) > 0:
+            st.success(f"✅ Delta descriptors calculated: {len(delta_df)} additive pairs found")
+            st.dataframe(delta_df.head(10))
+            
+            # Merge delta descriptors back to main dataframe for use in plots
+            # We'll keep delta_df separate for dedicated analysis
+        else:
+            st.warning("No additive pairs found for delta descriptor calculation")
     
     # ============================================
     # SECTION C: Filters (sidebar)
@@ -921,7 +1085,7 @@ def main():
     # ============================================
     # MAIN TABS
     # ============================================
-    tab1, tab2, tab3 = st.tabs(["🌡️ Heat Maps", "🫧 Bubble Charts", "📋 Data"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🌡️ Heat Maps", "🫧 Bubble Charts", "📊 Additive Analysis", "📋 Data"])
     
     # ============================================
     # TAB 1: HEAT MAPS
@@ -932,6 +1096,13 @@ def main():
         numeric_cols = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm', 
                        'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
                        'molar_mass', 'porosity', 'grain_boundary_area']
+        
+        # Add delta descriptors if they exist in df
+        delta_cols_available = []
+        for col in ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel']:
+            if col in df_filtered.columns:
+                numeric_cols.append(col)
+                delta_cols_available.append(col)
         
         temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
                     'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
@@ -975,6 +1146,20 @@ def main():
                 index=0
             )
         
+        # Data type filter
+        data_type = st.radio(
+            "Data type",
+            options=['All data', 'Pure only', 'Additives only'],
+            horizontal=True
+        )
+        
+        # Apply data type filter
+        df_plot_type = df_filtered.copy()
+        if data_type == 'Pure only':
+            df_plot_type = df_plot_type[df_plot_type['Sintering additive'].str.lower() == 'pure']
+        elif data_type == 'Additives only':
+            df_plot_type = df_plot_type[df_plot_type['Sintering additive'].str.lower() != 'pure']
+        
         # Outlier removal controls for X and Y
         col1, col2 = st.columns(2)
         with col1:
@@ -993,7 +1178,7 @@ def main():
             )
         
         # Apply outlier removal
-        df_plot = df_filtered.copy()
+        df_plot = df_plot_type.copy()
         if outlier_x > 0:
             df_plot = remove_outliers(df_plot, x_axis, outlier_x)
         if outlier_y > 0:
@@ -1024,7 +1209,6 @@ def main():
         )
         palette = COLOR_PALETTES[palette_name]
         
-        # Additional controls for contour plot
         if plot_type == 'Contour plot':
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -1056,7 +1240,6 @@ def main():
             if len(df_plot) == 0:
                 st.warning("No data available after filtering")
             else:
-                # Determine marker style based on active filters
                 marker_style, show_legend = get_filter_markers(df_plot, active_filters_count)
                 
                 if plot_type == 'Scatter with color scale':
@@ -1103,6 +1286,11 @@ def main():
                               'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
                               'molar_mass', 'porosity', 'grain_boundary_area']
         
+        # Add delta descriptors if they exist in df
+        for col in ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel']:
+            if col in df_filtered.columns:
+                numeric_cols_bubble.append(col)
+        
         y_options = available_temp_cols + ['Ea_final']
         
         if available_temp_cols:
@@ -1143,6 +1331,21 @@ def main():
                 index=0
             )
         
+        # Data type filter
+        data_type_bubble = st.radio(
+            "Data type",
+            options=['All data', 'Pure only', 'Additives only'],
+            horizontal=True,
+            key="data_type_bubble"
+        )
+        
+        # Apply data type filter
+        df_plot_type_bubble = df_filtered.copy()
+        if data_type_bubble == 'Pure only':
+            df_plot_type_bubble = df_plot_type_bubble[df_plot_type_bubble['Sintering additive'].str.lower() == 'pure']
+        elif data_type_bubble == 'Additives only':
+            df_plot_type_bubble = df_plot_type_bubble[df_plot_type_bubble['Sintering additive'].str.lower() != 'pure']
+        
         # Outlier removal controls for X and Y in bubble charts
         col1, col2 = st.columns(2)
         with col1:
@@ -1163,16 +1366,24 @@ def main():
             )
         
         # Apply outlier removal
-        df_plot_bubble = df_filtered.copy()
+        df_plot_bubble = df_plot_type_bubble.copy()
         if outlier_x_bubble > 0:
             df_plot_bubble = remove_outliers(df_plot_bubble, x_axis_bubble, outlier_x_bubble)
         if outlier_y_bubble > 0:
             df_plot_bubble = remove_outliers(df_plot_bubble, y_axis_bubble, outlier_y_bubble)
         
         if y_axis_bubble in available_temp_cols:
-            y_label = y_axis_bubble.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
+            selected_temp_bubble = st.selectbox(
+                "Select temperature for conductivity",
+                options=available_temp_cols,
+                index=available_temp_cols.index(default_temp) if default_temp in available_temp_cols else 0,
+                key="temp_bubble"
+            )
+            y_label = selected_temp_bubble.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
+            y_col_bubble = selected_temp_bubble
         else:
             y_label = 'Ea (eV)'
+            y_col_bubble = 'Ea_final'
         
         palette_name_bubble = st.selectbox(
             "Color palette for bubbles",
@@ -1209,11 +1420,10 @@ def main():
                 else:
                     size_col_bubble = size_axis
                 
-                # Determine marker style based on active filters
                 marker_style, show_legend = get_filter_markers(df_plot_bubble, active_filters_count)
                 
                 fig = create_bubble_chart(
-                    df_plot_bubble, x_axis_bubble, y_axis_bubble, 
+                    df_plot_bubble, x_axis_bubble, y_col_bubble, 
                     color_col_bubble, size_col_bubble,
                     log_x_bubble, log_y_bubble, log_color_bubble, log_size_bubble,
                     palette_bubble, '', x_axis_bubble, y_label,
@@ -1234,9 +1444,187 @@ def main():
                     plt.close(fig)
     
     # ============================================
-    # TAB 3: DATA
+    # TAB 3: ADDITIVE ANALYSIS
     # ============================================
     with tab3:
+        st.header("📊 Analysis of Sintering Additives")
+        
+        if len(delta_df) == 0:
+            st.warning("No additive pairs found. Delta descriptors cannot be calculated.")
+        else:
+            # Filter delta_df using the same filters as main data
+            # (We need to merge with main df to apply filters)
+            delta_filtered = delta_df.copy()
+            
+            # Apply additive type filter if selected in sidebar
+            if 'Sintering additive' in df_filtered.columns:
+                available_additives = df_filtered['Sintering additive'].unique()
+                delta_filtered = delta_filtered[delta_filtered['Sintering additive'].isin(available_additives)]
+            
+            if len(delta_filtered) == 0:
+                st.warning("No data available after filtering")
+            else:
+                st.subheader("Delta Descriptors Table")
+                st.dataframe(delta_filtered)
+                
+                # Download delta data
+                csv_delta = delta_filtered.to_csv(index=False, sep='\t')
+                st.download_button(
+                    label="📥 Download Delta Data (TSV)",
+                    data=csv_delta,
+                    file_name="delta_descriptors.tsv",
+                    mime="text/tab-separated-values"
+                )
+                
+                st.markdown("---")
+                st.subheader("Effectiveness of Sintering Additives")
+                
+                # Select temperature for Δσ
+                delta_temp_cols = [col for col in delta_filtered.columns if col.startswith('Δσ total,')]
+                
+                if len(delta_temp_cols) > 0:
+                    selected_delta_temp = st.selectbox(
+                        "Select temperature for Δσ analysis",
+                        options=delta_temp_cols,
+                        index=0
+                    )
+                    
+                    # Plotting options for delta analysis
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        x_delta = st.selectbox(
+                            "X-axis for delta analysis",
+                            options=['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel', 'x, wt%'],
+                            index=0
+                        )
+                    
+                    with col2:
+                        color_delta = st.selectbox(
+                            "Color by",
+                            options=['Sintering additive', 'Atmospheres', 'Humidity'],
+                            index=0
+                        )
+                    
+                    # Prepare data for plotting
+                    plot_delta = delta_filtered.dropna(subset=[x_delta, selected_delta_temp, color_delta])
+                    
+                    if len(plot_delta) > 0:
+                        # Scatter plot: Δρ/Δd vs Δσ
+                        fig, ax = plt.subplots(figsize=(8, 6))
+                        
+                        # Get unique categories for coloring
+                        categories = plot_delta[color_delta].unique()
+                        palette_colors = plt.cm.tab10(np.linspace(0, 1, len(categories)))
+                        
+                        for i, cat in enumerate(categories):
+                            mask = plot_delta[color_delta] == cat
+                            if mask.sum() > 0:
+                                ax.scatter(
+                                    plot_delta[mask][x_delta],
+                                    plot_delta[mask][selected_delta_temp],
+                                    label=cat,
+                                    color=palette_colors[i],
+                                    s=80,
+                                    alpha=0.7,
+                                    edgecolors='black',
+                                    linewidth=0.5
+                                )
+                        
+                        ax.set_xlabel(x_delta, fontsize=11, fontweight='bold')
+                        ax.set_ylabel(selected_delta_temp.replace('Δσ total, ', 'Δσ at ') + ' °C (mS/cm)', 
+                                     fontsize=11, fontweight='bold')
+                        ax.grid(True, alpha=0.3, linestyle='--')
+                        ax.legend(loc='upper right', frameon=True, framealpha=0.9)
+                        
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                        
+                        buf = download_plot(fig, "delta_analysis.png")
+                        st.download_button(
+                            label="📥 Download Plot (PNG, 600 dpi)",
+                            data=buf,
+                            file_name="delta_analysis.png",
+                            mime="image/png"
+                        )
+                        plt.close(fig)
+                    else:
+                        st.warning("Not enough data for the selected parameters")
+                
+                # Correlation matrix for additives
+                st.markdown("---")
+                st.subheader("Correlation Matrix for Additives")
+                
+                corr_temp_options = [col for col in delta_filtered.columns if col.startswith('Δσ total,')]
+                if len(corr_temp_options) == 0:
+                    corr_temp_options = [col for col in available_temp_cols if col in df_filtered.columns]
+                
+                if len(corr_temp_options) > 0:
+                    selected_corr_temp = st.selectbox(
+                        "Select temperature for correlation matrix",
+                        options=corr_temp_options,
+                        index=0,
+                        key="corr_temp_additive"
+                    )
+                    
+                    if st.button("Generate Correlation Matrix (Additives)", key="corr_additive_btn"):
+                        # Use delta_filtered for correlation
+                        corr_df = delta_filtered.copy()
+                        
+                        # Rename Δσ columns to simpler names for correlation
+                        if selected_corr_temp in corr_df.columns:
+                            corr_df['Δσ_selected'] = corr_df[selected_corr_temp]
+                        
+                        # Select columns for correlation
+                        corr_cols_add = ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel', 'x, wt%']
+                        corr_cols_add = [col for col in corr_cols_add if col in corr_df.columns]
+                        
+                        if 'Δσ_selected' in corr_df.columns:
+                            corr_cols_add.append('Δσ_selected')
+                        
+                        if len(corr_cols_add) >= 2:
+                            # Calculate correlation on numeric columns only
+                            corr_data = corr_df[corr_cols_add].select_dtypes(include=[np.number])
+                            corr_data = corr_data.dropna()
+                            
+                            if len(corr_data) > 0:
+                                # Rename columns for better display
+                                rename_dict = {}
+                                for col in corr_data.columns:
+                                    if col == 'Δσ_selected':
+                                        rename_dict[col] = f'Δσ at {selected_corr_temp.replace("Δσ total, ", "")}'
+                                    else:
+                                        rename_dict[col] = col
+                                corr_data = corr_data.rename(columns=rename_dict)
+                                
+                                corr_matrix = corr_data.corr()
+                                
+                                fig, ax = plt.subplots(figsize=(10, 8))
+                                sns.heatmap(corr_matrix, annot=True, fmt='.2f', 
+                                           cmap='coolwarm', vmin=-1, vmax=1, center=0,
+                                           square=True, linewidths=0.5,
+                                           annot_kws={"size": 9}, ax=ax)
+                                ax.set_title('')
+                                plt.tight_layout()
+                                st.pyplot(fig)
+                                
+                                buf = download_plot(fig, "correlation_additive.png")
+                                st.download_button(
+                                    label="📥 Download Correlation Matrix (PNG, 600 dpi)",
+                                    data=buf,
+                                    file_name="correlation_additive.png",
+                                    mime="image/png"
+                                )
+                                plt.close(fig)
+                            else:
+                                st.warning("Not enough numeric data for correlation")
+                        else:
+                            st.warning("Not enough columns for correlation matrix")
+    
+    # ============================================
+    # TAB 4: DATA
+    # ============================================
+    with tab4:
         st.header("📋 Data with Calculated Descriptors")
         
         st.dataframe(df_filtered)
@@ -1253,6 +1641,40 @@ def main():
         numeric_display = df_filtered.select_dtypes(include=[np.number])
         if not numeric_display.empty:
             st.dataframe(numeric_display.describe())
+        
+        # Correlation matrix for all data
+        st.markdown("---")
+        st.subheader("Correlation Matrix (All Data)")
+        
+        if len(available_temp_cols) > 0:
+            corr_temp_all = st.selectbox(
+                "Select temperature for correlation matrix",
+                options=available_temp_cols,
+                index=0,
+                key="corr_temp_all"
+            )
+            
+            palette_corr = st.selectbox(
+                "Color palette for correlation",
+                options=list(COLOR_PALETTES.keys()),
+                index=0,
+                key="corr_palette"
+            )
+            
+            if st.button("Generate Correlation Matrix (All Data)", key="corr_all_btn"):
+                fig = create_correlation_matrix(df_filtered, corr_temp_all, COLOR_PALETTES[palette_corr])
+                
+                if fig is not None:
+                    st.pyplot(fig)
+                    
+                    buf = download_plot(fig, "correlation_all.png")
+                    st.download_button(
+                        label="📥 Download Correlation Matrix (PNG, 600 dpi)",
+                        data=buf,
+                        file_name="correlation_all.png",
+                        mime="image/png"
+                    )
+                    plt.close(fig)
 
 # ============================================
 # APPLICATION LAUNCH
