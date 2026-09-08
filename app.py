@@ -622,6 +622,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
+    # Import here to avoid issues
+    import matplotlib.lines as mlines
+    
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
         # Use different markers for each category
         categories = plot_data[filter_name].unique()
@@ -650,7 +653,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         handles, labels = ax.get_legend_handles_labels()
         
         # Add size legend entries
-        import matplotlib.lines as mlines
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -661,17 +663,17 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
+        # Add size entries to existing handles and labels
         for val, size in zip(size_legend_values, size_legend_sizes):
-            # Use a generic marker for size legend (circle)
             handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'{val:.2f}',
+                          label=f'Size: {val:.2f}',
                           markersize=np.sqrt(size/2),
                           markerfacecolor='gray', 
                           markeredgecolor='black'))
-            labels.append(f'{val:.2f}')
+            labels.append(f'Size: {val:.2f}')
         
-        # Create combined legend
-        ax.legend(handles, labels, title=f'Categories & Size: {size_label}',
+        # Create combined legend WITHOUT title
+        ax.legend(handles, labels, title='',
                   loc='upper right', frameon=True, framealpha=0.9)
         
     else:
@@ -688,7 +690,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           fontsize=11, fontweight='bold')
         
         # Add size legend only
-        import matplotlib.lines as mlines
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -702,12 +703,12 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         legend_elements = []
         for val, size in zip(size_legend_values, size_legend_sizes):
             legend_elements.append(mlines.Line2D([0], [0], marker='o', color='w',
-                                  label=f'{val:.2f}',
+                                  label=f'Size: {val:.2f}',
                                   markersize=np.sqrt(size/2),
                                   markerfacecolor='gray', 
                                   markeredgecolor='black'))
         
-        ax.legend(handles=legend_elements, title=f'Size: {size_label}',
+        ax.legend(handles=legend_elements, title='',
                   loc='upper right', frameon=True, framealpha=0.9)
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
