@@ -646,7 +646,34 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        ax.legend(loc='upper right', frameon=True, framealpha=0.9)
+        # Get existing legend handles and labels from the scatter plot
+        handles, labels = ax.get_legend_handles_labels()
+        
+        # Add size legend entries
+        import matplotlib.lines as mlines
+        if size_log:
+            size_label = f'log10({plot_data[size_col].name})'
+        else:
+            size_label = plot_data[size_col].name
+        
+        size_legend_values = [np.percentile(sizes, 25), np.percentile(sizes, 50), 
+                              np.percentile(sizes, 75)] if len(sizes) > 0 else [1, 2, 3]
+        size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
+                             if sizes.max() > sizes.min() else 50 for v in size_legend_values]
+        
+        for val, size in zip(size_legend_values, size_legend_sizes):
+            # Use a generic marker for size legend (circle)
+            handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'{val:.2f}',
+                          markersize=np.sqrt(size/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+            labels.append(f'{val:.2f}')
+        
+        # Create combined legend
+        ax.legend(handles, labels, title=f'Categories & Size: {size_label}',
+                  loc='upper right', frameon=True, framealpha=0.9)
+        
     else:
         scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
                             cmap=palette, alpha=0.7, edgecolors='black', 
@@ -659,30 +686,29 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         else:
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
-    
-    if size_log:
-        size_label = f'log10({plot_data[size_col].name})'
-    else:
-        size_label = plot_data[size_col].name
-    
-    from matplotlib.patches import Circle
-    import matplotlib.lines as mlines
-    
-    size_legend_values = [np.percentile(sizes, 25), np.percentile(sizes, 50), 
-                          np.percentile(sizes, 75)] if len(sizes) > 0 else [1, 2, 3]
-    size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
-                         if sizes.max() > sizes.min() else 50 for v in size_legend_values]
-    
-    legend_elements = []
-    for val, size in zip(size_legend_values, size_legend_sizes):
-        legend_elements.append(mlines.Line2D([0], [0], marker='o', color='w',
-                              label=f'{val:.2f}',
-                              markersize=np.sqrt(size/2),
-                              markerfacecolor='gray', 
-                              markeredgecolor='black'))
-    
-    ax.legend(handles=legend_elements, title=f'Size: {size_label}',
-              loc='upper right', frameon=True, framealpha=0.9)
+        
+        # Add size legend only
+        import matplotlib.lines as mlines
+        if size_log:
+            size_label = f'log10({plot_data[size_col].name})'
+        else:
+            size_label = plot_data[size_col].name
+        
+        size_legend_values = [np.percentile(sizes, 25), np.percentile(sizes, 50), 
+                              np.percentile(sizes, 75)] if len(sizes) > 0 else [1, 2, 3]
+        size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
+                             if sizes.max() > sizes.min() else 50 for v in size_legend_values]
+        
+        legend_elements = []
+        for val, size in zip(size_legend_values, size_legend_sizes):
+            legend_elements.append(mlines.Line2D([0], [0], marker='o', color='w',
+                                  label=f'{val:.2f}',
+                                  markersize=np.sqrt(size/2),
+                                  markerfacecolor='gray', 
+                                  markeredgecolor='black'))
+        
+        ax.legend(handles=legend_elements, title=f'Size: {size_label}',
+                  loc='upper right', frameon=True, framealpha=0.9)
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
