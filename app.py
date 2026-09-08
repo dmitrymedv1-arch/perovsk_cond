@@ -1,3 +1,622 @@
+# ============================================
+# app.py - Полный код Streamlit приложения
+# ============================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize, LogNorm
+from matplotlib.cm import ScalarMappable
+import io
+import warnings
+from scipy.optimize import curve_fit
+from scipy.interpolate import griddata
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+import matplotlib
+matplotlib.use('Agg')  # Для предотвращения ошибок с backend
+
+warnings.filterwarnings('ignore')
+
+# ============================================
+# КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
+# ============================================
+
+# Настройка стиля для научных публикаций
+plt.rcParams.update({
+    'font.size': 10,
+    'axes.labelsize': 11,
+    'axes.labelweight': 'bold',
+    'axes.titlesize': 12,
+    'axes.titleweight': 'bold',
+    'axes.edgecolor': 'black',
+    'axes.linewidth': 1.0,
+    'xtick.color': 'black',
+    'ytick.color': 'black',
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'legend.fontsize': 10,
+    'legend.frameon': True,
+    'legend.framealpha': 0.9,
+    'legend.edgecolor': 'black',
+    'figure.dpi': 600,
+    'savefig.dpi': 600,
+    'savefig.bbox': 'tight',
+    'savefig.pad_inches': 0.1
+})
+
+# Доступные цветовые палитры (10 вариантов)
+COLOR_PALETTES = {
+    'Viridis': 'viridis',
+    'Plasma': 'plasma',
+    'Inferno': 'inferno',
+    'Magma': 'magma',
+    'Cividis': 'cividis',
+    'Turbo': 'turbo',
+    'Jet': 'jet',
+    'Rainbow': 'rainbow',
+    'Spectral': 'Spectral',
+    'Coolwarm': 'coolwarm'
+}
+
+# Словари для расчета дескрипторов
+IONIC_RADII = {
+    'Ba': 1.61,   # XII координационное число
+    'Zr': 0.72, 'Ce': 0.87, 'Sn': 0.69,  # IV координационное число
+    'Y': 0.90, 'Gd': 0.94, 'Yb': 0.87, 'Sm': 0.96,  # III координационное число
+    'O': 1.40
+}
+
+ELECTRONEGATIVITY = {
+    'Ba': 0.89, 'Zr': 1.33, 'Ce': 1.12, 'Sn': 1.96,
+    'Y': 1.22, 'Gd': 1.20, 'Yb': 1.10, 'Sm': 1.17, 'O': 3.44
+}
+
+MOLAR_MASS = {
+    'Ba': 137.33, 'Zr': 91.22, 'Ce': 140.12, 'Sn': 118.71,
+    'Y': 88.91, 'Gd': 157.25, 'Yb': 173.05, 'Sm': 150.36, 'O': 16.00
+}
+
+# ============================================
+# ФУНКЦИИ РАСЧЕТА ДЕСКРИПТОРОВ
+# ============================================
+
+def compute_descriptors(df):
+    """
+    Вычисление структурных, электроотрицательных и массовых дескрипторов
+    для всех строк датафрейма
+    """
+    desc_df = pd.DataFrame(index=df.index)
+    
+    for idx, row in df.iterrows():
+        # Извлечение мольных долей
+        x_B2 = row['B2_cont'] if pd.notna(row['B2_cont']) else 0.0
+        x_dop = row['dop_cont'] if pd.notna(row['dop_cont']) else 0.0
+        
+        # Проверка наличия B2 катиона
+        has_B2 = pd.notna(row['B2 cation']) and row['B2 cation'] != ''
+        
+        # Расчет x_B1
+        if has_B2:
+            x_B1 = 1.0 - x_B2 - x_dop
+        else:
+            x_B1 = 1.0 - x_dop
+            x_B2 = 0.0
+        
+        # Расчет среднего ионного радиуса B-подрешетки
+        r_B = 0.0
+        if x_B1 > 0:
+            r_B += x_B1 * IONIC_RADII[row['B1 cation']]
+        if x_B2 > 0 and has_B2:
+            r_B += x_B2 * IONIC_RADII[row['B2 cation']]
+        if x_dop > 0:
+            r_B += x_dop * IONIC_RADII[row['dopant']]
+        
+        # Tолеранс-фактор Гольдшмидта (для кубического перовскита)
+        r_A = IONIC_RADII['Ba']
+        r_O = IONIC_RADII['O']
+        t_factor = (r_A + r_O) / (np.sqrt(2) * (r_B + r_O))
+        
+        # Средняя электроотрицательность B-подрешетки
+        chi_B = 0.0
+        if x_B1 > 0:
+            chi_B += x_B1 * ELECTRONEGATIVITY[row['B1 cation']]
+        if x_B2 > 0 and has_B2:
+            chi_B += x_B2 * ELECTRONEGATIVITY[row['B2 cation']]
+        if x_dop > 0:
+            chi_B += x_dop * ELECTRONEGATIVITY[row['dopant']]
+        
+        chi_ratio = chi_B / ELECTRONEGATIVITY['Ba']
+        
+        # Молярная масса (приближенная)
+        molar_mass = 0.0
+        molar_mass += x_B1 * MOLAR_MASS[row['B1 cation']]
+        if x_B2 > 0 and has_B2:
+            molar_mass += x_B2 * MOLAR_MASS[row['B2 cation']]
+        if x_dop > 0:
+            molar_mass += x_dop * MOLAR_MASS[row['dopant']]
+        molar_mass += 3 * MOLAR_MASS['O']  # приближенно O3
+        
+        # Микроструктурные метрики
+        rho = row['ρ, %'] if pd.notna(row['ρ, %']) else np.nan
+        d = row['d, mkm'] if pd.notna(row['d, mkm']) else np.nan
+        
+        porosity = 100 - rho if pd.notna(rho) else np.nan
+        gb_area = 3.722 / d if pd.notna(d) and d > 0 else np.nan
+        
+        # Сохранение
+        desc_df.loc[idx, 'tolerance_factor'] = t_factor
+        desc_df.loc[idx, 'chi_B_avg'] = chi_B
+        desc_df.loc[idx, 'chi_ratio'] = chi_ratio
+        desc_df.loc[idx, 'molar_mass'] = molar_mass
+        desc_df.loc[idx, 'porosity'] = porosity
+        desc_df.loc[idx, 'grain_boundary_area'] = gb_area
+        desc_df.loc[idx, 'x_B1'] = x_B1
+        desc_df.loc[idx, 'x_B2'] = x_B2
+        desc_df.loc[idx, 'x_dop'] = x_dop
+    
+    return desc_df
+
+# ============================================
+# ФУНКЦИЯ РАСЧЕТА Ea
+# ============================================
+
+def calculate_ea(row):
+    """
+    Расчет энергии активации по уравнению Аррениуса
+    Используются все доступные температуры проводимости
+    """
+    # Если Ea уже есть, возвращаем его
+    if pd.notna(row['Ea (eV)']) and row['Ea (eV)'] != '':
+        return row['Ea (eV)']
+    
+    # Собираем все температуры и проводимости
+    temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
+                 'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
+                 'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
+                 'σ total, 800', 'σ total, 850', 'σ total, 900']
+    
+    temps = []
+    sigmas = []
+    
+    for col in temp_cols:
+        if col in row.index and pd.notna(row[col]) and row[col] > 0:
+            # Извлекаем температуру из названия колонки
+            T = int(col.split(', ')[1])
+            temps.append(T + 273.15)  # перевод в Кельвины
+            sigmas.append(row[col] * 1e-3)  # перевод из mS/cm в S/cm
+    
+    # Если меньше 2 точек, возвращаем NaN
+    if len(temps) < 2:
+        return np.nan
+    
+    # Уравнение Аррениуса: ln(σ*T) = ln(A) - Ea/(R*T)
+    # Преобразуем: y = ln(σ*T), x = 1000/T
+    y = np.log(np.array(sigmas) * np.array(temps))
+    x = 1000 / np.array(temps)
+    
+    # Линейная регрессия
+    try:
+        slope, intercept = np.polyfit(x, y, 1)
+        # Ea = -slope * R, где R = 8.314 Дж/(моль·К)
+        # Для перевода в эВ: 1 эВ = 96485 Дж/моль
+        ea = -slope * 8.314 / 96485  # в эВ
+        return ea
+    except:
+        return np.nan
+
+# ============================================
+# ФУНКЦИИ ДЛЯ ГРАФИКОВ
+# ============================================
+
+def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log, 
+                           palette, title, xlabel, ylabel, zlabel):
+    """
+    Создание scatter plot с цветовой шкалой
+    """
+    # Подготовка данных
+    plot_data = df.dropna(subset=[x_col, y_col, z_col])
+    
+    if len(plot_data) == 0:
+        st.warning("Нет данных для построения графика")
+        return None
+    
+    x = plot_data[x_col].values
+    y = plot_data[y_col].values
+    z = plot_data[z_col].values
+    
+    # Логарифмирование
+    if x_log:
+        mask = x > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) == 0:
+            st.warning("Все значения x ≤ 0, невозможно построить логарифмический график")
+            return None
+        x = np.log10(x)
+        xlabel = f'log10({xlabel})'
+    
+    if y_log:
+        mask = y > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(y) == 0:
+            st.warning("Все значения y ≤ 0, невозможно построить логарифмический график")
+            return None
+        y = np.log10(y)
+        ylabel = f'log10({ylabel})'
+    
+    if z_log:
+        mask = z > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(z) == 0:
+            st.warning("Все значения z ≤ 0, невозможно построить логарифмический график")
+            return None
+        z = np.log10(z)
+        zlabel = f'log10({zlabel})'
+    
+    # Создание графика
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    scatter = ax.scatter(x, y, c=z, cmap=palette, s=50, 
+                         edgecolors='black', linewidth=0.5, alpha=0.8)
+    
+    # Цветовая шкала
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+    
+    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.tight_layout()
+    return fig
+
+def create_contour_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
+                           palette, title, xlabel, ylabel, zlabel, grid_resolution=50):
+    """
+    Создание контурного графика с интерполяцией
+    """
+    # Подготовка данных
+    plot_data = df.dropna(subset=[x_col, y_col, z_col])
+    
+    if len(plot_data) < 4:
+        st.warning("Недостаточно данных для контурного графика (нужно минимум 4 точки)")
+        return None
+    
+    x = plot_data[x_col].values
+    y = plot_data[y_col].values
+    z = plot_data[z_col].values
+    
+    # Логарифмирование
+    if x_log:
+        mask = x > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) < 4:
+            st.warning("Недостаточно данных после логарифмирования")
+            return None
+        x = np.log10(x)
+        xlabel = f'log10({xlabel})'
+    
+    if y_log:
+        mask = y > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) < 4:
+            st.warning("Недостаточно данных после логарифмирования")
+            return None
+        y = np.log10(y)
+        ylabel = f'log10({ylabel})'
+    
+    if z_log:
+        mask = z > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) < 4:
+            st.warning("Недостаточно данных после логарифмирования")
+            return None
+        z = np.log10(z)
+        zlabel = f'log10({zlabel})'
+    
+    # Создание регулярной сетки для интерполяции
+    xi = np.linspace(x.min(), x.max(), grid_resolution)
+    yi = np.linspace(y.min(), y.max(), grid_resolution)
+    xi, yi = np.meshgrid(xi, yi)
+    
+    # Интерполяция
+    try:
+        zi = griddata((x, y), z, (xi, yi), method='cubic')
+    except:
+        try:
+            zi = griddata((x, y), z, (xi, yi), method='linear')
+        except:
+            st.warning("Не удалось выполнить интерполяцию данных")
+            return None
+    
+    # Создание графика
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    contour = ax.contourf(xi, yi, zi, levels=20, cmap=palette)
+    contour_lines = ax.contour(xi, yi, zi, levels=20, colors='black', 
+                               linewidths=0.5, alpha=0.3)
+    ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.2f')
+    
+    # Точки данных
+    ax.scatter(x, y, color='red', s=30, edgecolors='white', 
+               linewidth=1, alpha=0.7, label='Data points')
+    
+    # Цветовая шкала
+    cbar = plt.colorbar(contour, ax=ax)
+    cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+    
+    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.tight_layout()
+    return fig
+
+def create_3d_surface(df, x_col, y_col, z_col, x_log, y_log, z_log,
+                      palette, title, xlabel, ylabel, zlabel):
+    """
+    Создание 3D поверхностного графика
+    """
+    # Подготовка данных
+    plot_data = df.dropna(subset=[x_col, y_col, z_col])
+    
+    if len(plot_data) < 4:
+        st.warning("Недостаточно данных для 3D графика (нужно минимум 4 точки)")
+        return None
+    
+    x = plot_data[x_col].values
+    y = plot_data[y_col].values
+    z = plot_data[z_col].values
+    
+    # Логарифмирование
+    if x_log:
+        mask = x > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) < 4:
+            st.warning("Недостаточно данных после логарифмирования")
+            return None
+        x = np.log10(x)
+        xlabel = f'log10({xlabel})'
+    
+    if y_log:
+        mask = y > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) < 4:
+            st.warning("Недостаточно данных после логарифмирования")
+            return None
+        y = np.log10(y)
+        ylabel = f'log10({ylabel})'
+    
+    if z_log:
+        mask = z > 0
+        x = x[mask]
+        y = y[mask]
+        z = z[mask]
+        if len(x) < 4:
+            st.warning("Недостаточно данных после логарифмирования")
+            return None
+        z = np.log10(z)
+        zlabel = f'log10({zlabel})'
+    
+    # Интерполяция для поверхности
+    xi = np.linspace(x.min(), x.max(), 30)
+    yi = np.linspace(y.min(), y.max(), 30)
+    xi, yi = np.meshgrid(xi, yi)
+    
+    try:
+        zi = griddata((x, y), z, (xi, yi), method='cubic')
+    except:
+        try:
+            zi = griddata((x, y), z, (xi, yi), method='linear')
+        except:
+            st.warning("Не удалось выполнить интерполяцию для 3D графика")
+            return None
+    
+    # Создание 3D графика
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    surf = ax.plot_surface(xi, yi, zi, cmap=palette, alpha=0.8, 
+                           linewidth=0, antialiased=True)
+    
+    # Точки данных
+    ax.scatter(x, y, z, color='red', s=30, alpha=0.7, label='Data points')
+    
+    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
+    ax.set_zlabel(zlabel, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    
+    # Цветовая шкаба
+    cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
+    cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+    
+    plt.tight_layout()
+    return fig
+
+def create_bubble_chart(df, x_col, y_col, color_col, size_col, 
+                        x_log, y_log, color_log, size_log,
+                        palette, title, xlabel, ylabel):
+    """
+    Создание пузырьковой диаграммы
+    """
+    # Подготовка данных
+    plot_data = df.dropna(subset=[x_col, y_col, color_col, size_col])
+    
+    if len(plot_data) == 0:
+        st.warning("Нет данных для построения графика")
+        return None
+    
+    x = plot_data[x_col].values
+    y = plot_data[y_col].values
+    colors = plot_data[color_col].values
+    sizes = plot_data[size_col].values
+    
+    # Логарифмирование
+    if x_log:
+        mask = x > 0
+        x = x[mask]
+        y = y[mask]
+        colors = colors[mask]
+        sizes = sizes[mask]
+        if len(x) == 0:
+            st.warning("Все значения x ≤ 0, невозможно построить логарифмический график")
+            return None
+        x = np.log10(x)
+        xlabel = f'log10({xlabel})'
+    
+    if y_log:
+        mask = y > 0
+        x = x[mask]
+        y = y[mask]
+        colors = colors[mask]
+        sizes = sizes[mask]
+        if len(y) == 0:
+            st.warning("Все значения y ≤ 0, невозможно построить логарифмический график")
+            return None
+        y = np.log10(y)
+        ylabel = f'log10({ylabel})'
+    
+    if color_log:
+        mask = colors > 0
+        x = x[mask]
+        y = y[mask]
+        colors = colors[mask]
+        sizes = sizes[mask]
+        if len(colors) == 0:
+            st.warning("Все значения color ≤ 0, невозможно построить логарифмический график")
+            return None
+        colors = np.log10(colors)
+    
+    if size_log:
+        mask = sizes > 0
+        x = x[mask]
+        y = y[mask]
+        colors = colors[mask]
+        sizes = sizes[mask]
+        if len(sizes) == 0:
+            st.warning("Все значения size ≤ 0, невозможно построить логарифмический график")
+            return None
+        sizes = np.log10(sizes)
+    
+    # Масштабирование размера для визуализации
+    if len(sizes) > 0:
+        size_min, size_max = sizes.min(), sizes.max()
+        if size_max > size_min:
+            sizes_scaled = 20 + 180 * (sizes - size_min) / (size_max - size_min)
+        else:
+            sizes_scaled = np.ones_like(sizes) * 50
+    else:
+        sizes_scaled = np.ones_like(sizes) * 50
+    
+    # Создание графика
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
+                         cmap=palette, alpha=0.7, edgecolors='black', 
+                         linewidth=0.5)
+    
+    # Цветовая шкала
+    cbar = plt.colorbar(scatter, ax=ax)
+    if color_log:
+        cbar.set_label(f'log10({plot_data[color_col].name})', 
+                      fontsize=11, fontweight='bold')
+    else:
+        cbar.set_label(plot_data[color_col].name, 
+                      fontsize=11, fontweight='bold')
+    
+    # Добавляем информацию о размере
+    if size_log:
+        size_label = f'log10({plot_data[size_col].name})'
+    else:
+        size_label = plot_data[size_col].name
+    
+    # Добавляем легенду для размеров
+    from matplotlib.patches import Circle
+    import matplotlib.lines as mlines
+    
+    # Создаем точки для легенды размера
+    size_legend_values = [np.percentile(sizes, 25), np.percentile(sizes, 50), 
+                          np.percentile(sizes, 75)] if len(sizes) > 0 else [1, 2, 3]
+    size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
+                         if sizes.max() > sizes.min() else 50 for v in size_legend_values]
+    
+    legend_elements = []
+    for val, size in zip(size_legend_values, size_legend_sizes):
+        legend_elements.append(mlines.Line2D([0], [0], marker='o', color='w',
+                              label=f'{val:.2f}',
+                              markersize=np.sqrt(size/2),
+                              markerfacecolor='gray', 
+                              markeredgecolor='black'))
+    
+    # Добавляем легенду
+    ax.legend(handles=legend_elements, title=f'Size: {size_label}',
+              loc='upper right', frameon=True, framealpha=0.9)
+    
+    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.tight_layout()
+    return fig
+
+# ============================================
+# ФУНКЦИЯ ДЛЯ СКАЧИВАНИЯ ГРАФИКА
+# ============================================
+
+def download_plot(fig, filename="plot.png"):
+    """
+    Преобразование графика в PNG для скачивания
+    """
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+    buf.seek(0)
+    return buf
+
+# ============================================
+# ОСНОВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# ============================================
+
+def main():
+    st.set_page_config(
+        page_title="Ceramic Conductivity Data Explorer",
+        page_icon="🔬",
+        layout="wide"
+    )
+    
+    st.title("🔬 Интерактивный анализ проводимости керамических материалов")
+    st.markdown("---")
+    
+    # ============================================
+    # Блок A: Загрузка данных (текстовое поле)
+    # ============================================
+    st.header("📊 Загрузка данных")
+    
+    st.markdown("""
+    **Вставьте данные в формате TSV (табуляция) или CSV (запятая):**
+    
+    *Пример:*
 """)
 
 data_input = st.text_area(
