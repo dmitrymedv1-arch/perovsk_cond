@@ -242,7 +242,10 @@ def calculate_ea(row):
 def remove_outliers(df, col, n):
     """
     Remove n smallest and n largest values from the dataset for a given column.
-    If the same extreme value appears more than n times, none of those rows are removed.
+    Logic:
+    - If selected value is 1: remove the single smallest and single largest value
+    - If the extreme value appears more than n times, none of those rows are removed
+    - We remove individual rows, not unique values
     """
     if n is None or n == 0:
         return df
@@ -250,38 +253,51 @@ def remove_outliers(df, col, n):
     if col not in df.columns:
         return df
     
-    # Get unique values sorted
-    unique_vals = sorted(df[col].dropna().unique())
+    # Get all values sorted
+    values = df[col].dropna().sort_values().values
     
-    if len(unique_vals) <= 2 * n:
+    if len(values) <= 2 * n:
         return df
     
-    # Determine which values to remove from the low end
-    low_vals_to_remove = []
-    for i in range(min(n, len(unique_vals))):
-        val = unique_vals[i]
+    # Find which rows to remove from the low end
+    low_rows_to_remove = []
+    removed_count = 0
+    
+    # Iterate from smallest to largest
+    for val in values:
+        if removed_count >= n:
+            break
+        # Count how many rows have this exact value
         count = (df[col] == val).sum()
-        if count <= n:
-            low_vals_to_remove.append(val)
+        # If count <= remaining removals, remove all of them
+        if count <= (n - removed_count):
+            low_rows_to_remove.extend(df[df[col] == val].index.tolist())
+            removed_count += count
         else:
+            # If count > remaining removals, we cannot remove any of this value
             break
     
-    # Determine which values to remove from the high end
-    high_vals_to_remove = []
-    for i in range(min(n, len(unique_vals))):
-        val = unique_vals[-(i+1)]
+    # Find which rows to remove from the high end
+    high_rows_to_remove = []
+    removed_count = 0
+    
+    # Iterate from largest to smallest
+    for val in reversed(values):
+        if removed_count >= n:
+            break
+        # Count how many rows have this exact value
         count = (df[col] == val).sum()
-        if count <= n:
-            high_vals_to_remove.append(val)
+        # If count <= remaining removals, remove all of them
+        if count <= (n - removed_count):
+            high_rows_to_remove.extend(df[df[col] == val].index.tolist())
+            removed_count += count
         else:
+            # If count > remaining removals, we cannot remove any of this value
             break
     
-    # Create filter mask
-    mask = pd.Series(True, index=df.index)
-    if low_vals_to_remove:
-        mask = mask & ~df[col].isin(low_vals_to_remove)
-    if high_vals_to_remove:
-        mask = mask & ~df[col].isin(high_vals_to_remove)
+    # Create filter mask - keep rows that are NOT in removal lists
+    rows_to_remove = set(low_rows_to_remove + high_rows_to_remove)
+    mask = ~df.index.isin(rows_to_remove)
     
     return df[mask]
 
