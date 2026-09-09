@@ -695,14 +695,14 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         # Create first legend: Additive categories - place on the right side
         legend1 = ax.legend(handles, labels, title='Additive:',
                            loc='center left', 
-                           bbox_to_anchor=(1.02, 0.55),
+                           bbox_to_anchor=(0.9, 0.95),
                            frameon=True, framealpha=0.9)
         ax.add_artist(legend1)
         
         # Create second legend: Size values - place below the first legend on the right
         legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
                            loc='center left',
-                           bbox_to_anchor=(1.02, 0.15),
+                           bbox_to_anchor=(0.9, 0.55),
                            frameon=True, framealpha=0.9)
         ax.add_artist(legend2)
         
