@@ -657,9 +657,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
                             cmap=palette, alpha=0.7, edgecolors='black', 
                             linewidth=0.5, visible=False)
-        
-        # Position colorbar on the right
-        cbar = plt.colorbar(scatter, ax=ax, pad=0.02)
+        cbar = plt.colorbar(scatter, ax=ax)
         if color_log:
             cbar.set_label(f'log10({plot_data[color_col].name})', 
                           fontsize=11, fontweight='bold')
@@ -681,7 +679,16 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
-        # Create size handles
+        # Create two separate legend groups using the same axes
+        
+        # FIRST LEGEND: Additive categories
+        legend1 = ax.legend(handles, labels, title='Additive:',
+                           loc='upper left', frameon=True, framealpha=0.9)
+        
+        # Add the first legend to the axes
+        ax.add_artist(legend1)
+        
+        # SECOND LEGEND: Size values
         size_handles = []
         size_labels = []
         for val, size in zip(size_legend_values, size_legend_sizes):
@@ -692,30 +699,19 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                               markeredgecolor='black'))
             size_labels.append(f'{val:.2f}')
         
-        # Create first legend: Additive categories - place on the right side
-        legend1 = ax.legend(handles, labels, title='Additive:',
-                           loc='center left', 
-                           bbox_to_anchor=(0.9, 0.95),
-                           frameon=True, framealpha=0.9)
-        ax.add_artist(legend1)
-        
-        # Create second legend: Size values - place below the first legend on the right
+        # Create second legend
         legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
-                           loc='center left',
-                           bbox_to_anchor=(0.9, 0.55),
-                           frameon=True, framealpha=0.9)
-        ax.add_artist(legend2)
+                           loc='upper right', frameon=True, framealpha=0.9)
         
-        # Adjust the right margin to make room for the legends
-        plt.subplots_adjust(right=0.75)
+        # Add the second legend to the axes
+        ax.add_artist(legend2)
         
     else:
         scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
                             cmap=palette, alpha=0.7, edgecolors='black', 
                             linewidth=0.5, marker=marker_style if isinstance(marker_style, str) else 'o')
         
-        # Position colorbar on the right
-        cbar = plt.colorbar(scatter, ax=ax, pad=0.02)
+        cbar = plt.colorbar(scatter, ax=ax)
         if color_log:
             cbar.set_label(f'log10({plot_data[color_col].name})', 
                           fontsize=11, fontweight='bold')
@@ -723,7 +719,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Add size legend only - place on the right side
+        # Add size legend only
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -745,12 +741,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             size_labels.append(f'{val:.2f}')
         
         ax.legend(size_handles, size_labels, title='Grain size:',
-                  loc='center left',
-                  bbox_to_anchor=(1.02, 0.5),
-                  frameon=True, framealpha=0.9)
-        
-        # Adjust the right margin to make room for the legend
-        plt.subplots_adjust(right=0.82)
+                  loc='upper right', frameon=True, framealpha=0.9)
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
