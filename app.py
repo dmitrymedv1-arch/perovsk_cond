@@ -1,5 +1,5 @@
 # ============================================
-# app.py - Полный код Streamlit приложения
+# app.py - Полный код Streamlit приложения с кэшированием
 # ============================================
 
 import streamlit as st
@@ -37,7 +37,7 @@ plt.rcParams.update({
     'ytick.labelsize': 10,
     'legend.fontsize': 10,
     'legend.frameon': True,
-    'legend.framealpha': 0.9,
+    'legend.framealpha': 0.5,
     'legend.edgecolor': 'black',
     'figure.dpi': 600,
     'savefig.dpi': 600,
@@ -134,10 +134,15 @@ MOLAR_MASS = {
 }
 
 # ============================================
-# FUNCTIONS FOR DESCRIPTOR CALCULATION
+# CACHED FUNCTIONS FOR DESCRIPTOR CALCULATION
 # ============================================
 
-def compute_descriptors(df):
+@st.cache_data
+def compute_descriptors_cached(df_hash, df):
+    """
+    Cached version of descriptor calculation.
+    df_hash is used as a cache key - when data changes, hash changes.
+    """
     desc_df = pd.DataFrame(index=df.index)
     
     for idx, row in df.iterrows():
@@ -200,40 +205,46 @@ def compute_descriptors(df):
     
     return desc_df
 
-# ============================================
-# FUNCTION FOR Ea CALCULATION
-# ============================================
-
-def calculate_ea(row):
-    if pd.notna(row['Ea (eV)']) and row['Ea (eV)'] != '':
-        return row['Ea (eV)']
+@st.cache_data
+def calculate_ea_cached(df_hash, df):
+    """
+    Cached version of Ea calculation.
+    """
+    result = []
+    for idx, row in df.iterrows():
+        if pd.notna(row['Ea (eV)']) and row['Ea (eV)'] != '':
+            result.append(row['Ea (eV)'])
+            continue
+        
+        temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
+                     'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
+                     'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
+                     'σ total, 800', 'σ total, 850', 'σ total, 900']
+        
+        temps = []
+        sigmas = []
+        
+        for col in temp_cols:
+            if col in row.index and pd.notna(row[col]) and row[col] > 0:
+                T = int(col.split(', ')[1])
+                temps.append(T + 273.15)
+                sigmas.append(row[col] * 1e-3)
+        
+        if len(temps) < 2:
+            result.append(np.nan)
+            continue
+        
+        y = np.log(np.array(sigmas) * np.array(temps))
+        x = 1000 / np.array(temps)
+        
+        try:
+            slope, intercept = np.polyfit(x, y, 1)
+            ea = -slope * 8.314 / 96485
+            result.append(ea)
+        except:
+            result.append(np.nan)
     
-    temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
-                 'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
-                 'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
-                 'σ total, 800', 'σ total, 850', 'σ total, 900']
-    
-    temps = []
-    sigmas = []
-    
-    for col in temp_cols:
-        if col in row.index and pd.notna(row[col]) and row[col] > 0:
-            T = int(col.split(', ')[1])
-            temps.append(T + 273.15)
-            sigmas.append(row[col] * 1e-3)
-    
-    if len(temps) < 2:
-        return np.nan
-    
-    y = np.log(np.array(sigmas) * np.array(temps))
-    x = 1000 / np.array(temps)
-    
-    try:
-        slope, intercept = np.polyfit(x, y, 1)
-        ea = -slope * 8.314 / 96485
-        return ea
-    except:
-        return np.nan
+    return result
 
 # ============================================
 # FUNCTION FOR OUTLIER REMOVAL
@@ -388,7 +399,7 @@ def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
         cbar = plt.colorbar(scatter, ax=ax)
         cbar.set_label(zlabel, fontsize=11, fontweight='bold')
         
-        ax.legend(loc='upper right', frameon=True, framealpha=0.9)
+        ax.legend(loc='upper right', frameon=True, framealpha=0.5)
     else:
         scatter = ax.scatter(x, y, c=z, cmap=palette, s=50, 
                             marker=marker_style if isinstance(marker_style, str) else 'o',
@@ -681,14 +692,14 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         
         # Create two separate legend groups using the same axes
         
-        # FIRST LEGEND: Additive categories
+        # FIRST LEGEND: Additive categories with increased transparency
         legend1 = ax.legend(handles, labels, title='Additive:',
                            loc='upper left', frameon=True, framealpha=0.75)
         
         # Add the first legend to the axes
         ax.add_artist(legend1)
         
-        # SECOND LEGEND: Size values
+        # SECOND LEGEND: Size values with increased transparency
         size_handles = []
         size_labels = []
         for val, size in zip(size_legend_values, size_legend_sizes):
@@ -699,7 +710,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                               markeredgecolor='black'))
             size_labels.append(f'{val:.2f}')
         
-        # Create second legend
+        # Create second legend with increased transparency
         legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
                            loc='upper right', frameon=True, framealpha=0.75)
         
@@ -719,7 +730,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Add size legend only
+        # Add size legend only with increased transparency
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -741,7 +752,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             size_labels.append(f'{val:.2f}')
         
         ax.legend(size_handles, size_labels, title='Grain size:',
-                  loc='upper right', frameon=True, framealpha=0.9)
+                  loc='upper right', frameon=True, framealpha=0.5)
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
@@ -783,54 +794,78 @@ def main():
     
     data_input = st.text_area(
         "Paste data here:",
-        height=200
+        height=200,
+        key="data_input"  # Add key for session state
     )
+    
+    # Initialize session state for data
+    if 'df_loaded' not in st.session_state:
+        st.session_state.df_loaded = None
+    if 'df_hash' not in st.session_state:
+        st.session_state.df_hash = None
     
     if not data_input:
         st.info("⏳ Please paste your data to begin")
         st.stop()
     
-    try:
-        lines = data_input.strip().split('\n')
-        if '\t' in lines[0]:
-            sep = '\t'
-        elif ',' in lines[0]:
-            sep = ','
-        else:
-            st.error("Unable to detect separator. Please use tab or comma.")
+    # Generate hash of input data to detect changes
+    import hashlib
+    current_hash = hashlib.md5(data_input.encode()).hexdigest()
+    
+    # Only reload if data has changed
+    if st.session_state.df_hash != current_hash or st.session_state.df_loaded is None:
+        try:
+            lines = data_input.strip().split('\n')
+            if '\t' in lines[0]:
+                sep = '\t'
+            elif ',' in lines[0]:
+                sep = ','
+            else:
+                st.error("Unable to detect separator. Please use tab or comma.")
+                st.stop()
+            
+            df = pd.read_csv(io.StringIO(data_input), sep=sep)
+            df.columns = df.columns.str.strip()
+            
+            # Store in session state
+            st.session_state.df_loaded = df
+            st.session_state.df_hash = current_hash
+            
+            st.success(f"✅ Data loaded: {len(df)} rows, {len(df.columns)} columns")
+            st.dataframe(df.head(10))
+            
+        except Exception as e:
+            st.error(f"Error parsing data: {str(e)}")
             st.stop()
-        
-        df = pd.read_csv(io.StringIO(data_input), sep=sep)
-        
-        df.columns = df.columns.str.strip()
-        
-        st.success(f"✅ Data loaded: {len(df)} rows, {len(df.columns)} columns")
+    else:
+        # Use cached data
+        df = st.session_state.df_loaded
+        st.success(f"✅ Using cached data: {len(df)} rows, {len(df.columns)} columns")
         st.dataframe(df.head(10))
-        
-    except Exception as e:
-        st.error(f"Error parsing data: {str(e)}")
-        st.stop()
     
     # ============================================
-    # DESCRIPTOR AND Ea CALCULATION
+    # DESCRIPTOR AND Ea CALCULATION (with caching)
     # ============================================
     st.markdown("---")
     st.header("🔄 Automatic Descriptor Calculation")
     
+    # Generate hash for descriptor caching
+    df_hash_desc = hashlib.md5(df.to_csv().encode()).hexdigest()
+    
     with st.spinner("Computing structural and electronegativity descriptors..."):
-        desc_df = compute_descriptors(df)
+        desc_df = compute_descriptors_cached(df_hash_desc, df)
         
         for col in desc_df.columns:
             df[col] = desc_df[col]
         
-        st.success("✅ Descriptors calculated")
+        st.success("✅ Descriptors calculated (cached)")
     
     with st.spinner("Calculating activation energy (Ea)..."):
-        df['Ea_calculated'] = df.apply(calculate_ea, axis=1)
-        
+        ea_values = calculate_ea_cached(df_hash_desc, df)
+        df['Ea_calculated'] = ea_values
         df['Ea_final'] = df['Ea (eV)'].fillna(df['Ea_calculated'])
         
-        st.success("✅ Ea calculated")
+        st.success("✅ Ea calculated (cached)")
     
     st.dataframe(df[['References', 'tolerance_factor', 'chi_B_avg', 
                     'chi_ratio', 'molar_mass', 'porosity', 
@@ -842,6 +877,12 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.header("🔍 Data Filters")
     
+    # Store filters in session state
+    if 'active_filters_count' not in st.session_state:
+        st.session_state.active_filters_count = 0
+    if 'active_filter_name' not in st.session_state:
+        st.session_state.active_filter_name = None
+    
     active_filters_count = 0
     active_filter_name = None
     
@@ -851,7 +892,8 @@ def main():
         selected_atmos = st.sidebar.multiselect(
             "Atmosphere",
             options=['All'] + atmos_options,
-            default=['All']
+            default=['All'],
+            key="atmos_filter"
         )
         if 'All' not in selected_atmos:
             df_filtered = df[df['Atmospheres'].isin(selected_atmos)]
@@ -869,7 +911,8 @@ def main():
             selected_humidity = st.sidebar.multiselect(
                 "Humidity",
                 options=['All'] + humidity_options,
-                default=['All']
+                default=['All'],
+                key="humidity_filter"
             )
             if 'All' not in selected_humidity:
                 df_filtered = df_filtered[df_filtered['Humidity'].isin(selected_humidity)]
@@ -883,7 +926,8 @@ def main():
             selected_structure = st.sidebar.multiselect(
                 "Structure",
                 options=['All'] + structure_options,
-                default=['All']
+                default=['All'],
+                key="structure_filter"
             )
             if 'All' not in selected_structure:
                 df_filtered['Structure_lower'] = df_filtered['Structure'].str.lower()
@@ -899,12 +943,17 @@ def main():
             selected_additive = st.sidebar.multiselect(
                 "Sintering additive",
                 options=['All'] + additive_options,
-                default=['All']
+                default=['All'],
+                key="additive_filter"
             )
             if 'All' not in selected_additive:
                 df_filtered = df_filtered[df_filtered['Sintering additive'].isin(selected_additive)]
                 active_filters_count += 1
                 active_filter_name = 'Sintering additive'
+    
+    # Store active filters in session state
+    st.session_state.active_filters_count = active_filters_count
+    st.session_state.active_filter_name = active_filter_name
     
     st.sidebar.markdown("---")
     st.sidebar.subheader("Value Ranges")
@@ -917,7 +966,8 @@ def main():
                 "Sintering temperature, °C",
                 min_value=t_min,
                 max_value=t_max,
-                value=(t_min, t_max)
+                value=(t_min, t_max),
+                key="tsin_range"
             )
             df_filtered = df_filtered[(df_filtered['T sin'] >= t_range[0]) & 
                                      (df_filtered['T sin'] <= t_range[1])]
@@ -930,7 +980,8 @@ def main():
                 "Dopant content",
                 min_value=d_min,
                 max_value=d_max,
-                value=(d_min, d_max)
+                value=(d_min, d_max),
+                key="dopant_range"
             )
             df_filtered = df_filtered[(df_filtered['dop_cont'] >= d_range[0]) & 
                                      (df_filtered['dop_cont'] <= d_range[1])]
@@ -943,7 +994,8 @@ def main():
                 "Sintering additive concentration, wt%",
                 min_value=x_min,
                 max_value=x_max,
-                value=(x_min, x_max)
+                value=(x_min, x_max),
+                key="additive_range"
             )
             df_filtered = df_filtered[(df_filtered['x, wt%'] >= x_range[0]) & 
                                      (df_filtered['x, wt%'] <= x_range[1])]
@@ -990,21 +1042,24 @@ def main():
             x_axis = st.selectbox(
                 "X-axis (descriptor)",
                 options=numeric_cols,
-                index=0
+                index=0,
+                key="heatmap_x"
             )
         
         with col2:
             y_axis = st.selectbox(
                 "Y-axis (descriptor)",
                 options=numeric_cols,
-                index=1 if len(numeric_cols) > 1 else 0
+                index=1 if len(numeric_cols) > 1 else 0,
+                key="heatmap_y"
             )
         
         with col3:
             z_axis = st.selectbox(
                 "Color scale (Z)",
                 options=temp_options,
-                index=0
+                index=0,
+                key="heatmap_z"
             )
         
         # Outlier removal controls for X and Y
@@ -1014,14 +1069,16 @@ def main():
                 "Remove outliers from X",
                 options=[0, 1, 2, 3],
                 index=0,
-                format_func=lambda x: 'None' if x == 0 else str(x)
+                format_func=lambda x: 'None' if x == 0 else str(x),
+                key="heatmap_outlier_x"
             )
         with col2:
             outlier_y = st.selectbox(
                 "Remove outliers from Y",
                 options=[0, 1, 2, 3],
                 index=0,
-                format_func=lambda x: 'None' if x == 0 else str(x)
+                format_func=lambda x: 'None' if x == 0 else str(x),
+                key="heatmap_outlier_y"
             )
         
         # Apply outlier removal
@@ -1035,7 +1092,8 @@ def main():
             selected_temp = st.selectbox(
                 "Select temperature for conductivity",
                 options=available_temp_cols,
-                index=available_temp_cols.index(default_temp) if default_temp in available_temp_cols else 0
+                index=available_temp_cols.index(default_temp) if default_temp in available_temp_cols else 0,
+                key="heatmap_temp"
             )
             z_col = selected_temp
             z_label = selected_temp.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
@@ -1046,13 +1104,15 @@ def main():
         plot_type = st.radio(
             "Heat map type",
             options=['Scatter with color scale', 'Contour plot', '3D surface'],
-            horizontal=True
+            horizontal=True,
+            key="heatmap_type"
         )
         
         palette_name = st.selectbox(
             "Color palette",
             options=list(COLOR_PALETTES.keys()),
-            index=0
+            index=0,
+            key="heatmap_palette"
         )
         palette = COLOR_PALETTES[palette_name]
         
@@ -1065,12 +1125,13 @@ def main():
                     min_value=20,
                     max_value=100,
                     value=50,
-                    step=10
+                    step=10,
+                    key="contour_resolution"
                 )
             with col2:
-                show_contour_lines = st.checkbox("Show contour lines", value=True)
+                show_contour_lines = st.checkbox("Show contour lines", value=True, key="contour_lines")
             with col3:
-                show_contour_labels = st.checkbox("Show contour labels", value=True)
+                show_contour_labels = st.checkbox("Show contour labels", value=True, key="contour_labels")
         else:
             grid_resolution = 50
             show_contour_lines = True
@@ -1078,25 +1139,25 @@ def main():
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            log_x = st.checkbox("log10(X)", value=False)
+            log_x = st.checkbox("log10(X)", value=False, key="heatmap_log_x")
         with col2:
-            log_y = st.checkbox("log10(Y)", value=False)
+            log_y = st.checkbox("log10(Y)", value=False, key="heatmap_log_y")
         with col3:
-            log_z = st.checkbox("log10(Z)", value=False)
+            log_z = st.checkbox("log10(Z)", value=False, key="heatmap_log_z")
         
         if st.button("Generate Heat Map", key="heatmap_btn"):
             if len(df_plot) == 0:
                 st.warning("No data available after filtering")
             else:
                 # Determine marker style based on active filters
-                marker_style, show_legend = get_filter_markers(df_plot, active_filters_count)
+                marker_style, show_legend = get_filter_markers(df_plot, st.session_state.active_filters_count)
                 
                 if plot_type == 'Scatter with color scale':
                     fig = create_scatter_heatmap(
                         df_plot, x_axis, y_axis, z_col,
                         log_x, log_y, log_z, palette,
                         '', x_axis, y_axis, z_label,
-                        marker_style, show_legend, active_filter_name
+                        marker_style, show_legend, st.session_state.active_filter_name
                     )
                 elif plot_type == 'Contour plot':
                     fig = create_contour_heatmap(
@@ -1120,7 +1181,8 @@ def main():
                         label="📥 Download Plot (PNG, 600 dpi)",
                         data=buf,
                         file_name="heatmap.png",
-                        mime="image/png"
+                        mime="image/png",
+                        key="download_heatmap"
                     )
                     
                     plt.close(fig)
@@ -1151,28 +1213,32 @@ def main():
             y_axis_bubble = st.selectbox(
                 "Y-axis (conductivity/Ea)",
                 options=y_options,
-                index=y_index
+                index=y_index,
+                key="bubble_y"
             )
         
         with col2:
             x_axis_bubble = st.selectbox(
                 "X-axis",
                 options=numeric_cols_bubble,
-                index=0
+                index=0,
+                key="bubble_x"
             )
         
         with col3:
             color_axis = st.selectbox(
                 "Bubble color",
                 options=['None'] + numeric_cols_bubble + ['Sintering additive', 'Atmospheres', 'Humidity', 'Structure'],
-                index=0
+                index=0,
+                key="bubble_color"
             )
         
         with col4:
             size_axis = st.selectbox(
                 "Bubble size",
                 options=['None'] + numeric_cols_bubble,
-                index=0
+                index=0,
+                key="bubble_size"
             )
         
         # Outlier removal controls for X and Y in bubble charts
@@ -1183,7 +1249,7 @@ def main():
                 options=[0, 1, 2, 3],
                 index=0,
                 format_func=lambda x: 'None' if x == 0 else str(x),
-                key="outlier_x_bubble"
+                key="bubble_outlier_x"
             )
         with col2:
             outlier_y_bubble = st.selectbox(
@@ -1191,7 +1257,7 @@ def main():
                 options=[0, 1, 2, 3],
                 index=0,
                 format_func=lambda x: 'None' if x == 0 else str(x),
-                key="outlier_y_bubble"
+                key="bubble_outlier_y"
             )
         
         # Apply outlier removal
@@ -1209,19 +1275,20 @@ def main():
         palette_name_bubble = st.selectbox(
             "Color palette for bubbles",
             options=list(COLOR_PALETTES.keys()),
-            index=0
+            index=0,
+            key="bubble_palette"
         )
         palette_bubble = COLOR_PALETTES[palette_name_bubble]
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            log_x_bubble = st.checkbox("log10(X)", value=False, key="log_x_bubble")
+            log_x_bubble = st.checkbox("log10(X)", value=False, key="bubble_log_x")
         with col2:
-            log_y_bubble = st.checkbox("log10(Y)", value=False, key="log_y_bubble")
+            log_y_bubble = st.checkbox("log10(Y)", value=False, key="bubble_log_y")
         with col3:
-            log_color_bubble = st.checkbox("log10(Color)", value=False, key="log_color_bubble")
+            log_color_bubble = st.checkbox("log10(Color)", value=False, key="bubble_log_color")
         with col4:
-            log_size_bubble = st.checkbox("log10(Size)", value=False, key="log_size_bubble")
+            log_size_bubble = st.checkbox("log10(Size)", value=False, key="bubble_log_size")
         
         if st.button("Generate Bubble Chart", key="bubble_btn"):
             if len(df_plot_bubble) == 0:
@@ -1242,14 +1309,14 @@ def main():
                     size_col_bubble = size_axis
                 
                 # Determine marker style based on active filters
-                marker_style, show_legend = get_filter_markers(df_plot_bubble, active_filters_count)
+                marker_style, show_legend = get_filter_markers(df_plot_bubble, st.session_state.active_filters_count)
                 
                 fig = create_bubble_chart(
                     df_plot_bubble, x_axis_bubble, y_axis_bubble, 
                     color_col_bubble, size_col_bubble,
                     log_x_bubble, log_y_bubble, log_color_bubble, log_size_bubble,
                     palette_bubble, '', x_axis_bubble, y_label,
-                    marker_style, show_legend, active_filter_name
+                    marker_style, show_legend, st.session_state.active_filter_name
                 )
                 
                 if fig is not None:
@@ -1260,7 +1327,8 @@ def main():
                         label="📥 Download Plot (PNG, 600 dpi)",
                         data=buf,
                         file_name="bubble_chart.png",
-                        mime="image/png"
+                        mime="image/png",
+                        key="download_bubble"
                     )
                     
                     plt.close(fig)
@@ -1278,7 +1346,8 @@ def main():
             label="📥 Download Data (TSV)",
             data=csv_data,
             file_name="filtered_data.tsv",
-            mime="text/tab-separated-values"
+            mime="text/tab-separated-values",
+            key="download_data"
         )
         
         st.subheader("📊 Data Statistics")
