@@ -679,16 +679,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
-        # Create two separate legend groups using the same axes
-        
-        # FIRST LEGEND: Additive categories
-        legend1 = ax.legend(handles, labels, title='Additive:',
-                           loc='upper left', frameon=True, framealpha=0.9)
-        
-        # Add the first legend to the axes
-        ax.add_artist(legend1)
-        
-        # SECOND LEGEND: Size values
+        # Create size legend handles
         size_handles = []
         size_labels = []
         for val, size in zip(size_legend_values, size_legend_sizes):
@@ -699,9 +690,21 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                               markeredgecolor='black'))
             size_labels.append(f'{val:.2f}')
         
-        # Create second legend
+        # FIRST LEGEND: Additive categories (top right)
+        legend1 = ax.legend(handles, labels, title='Additive:',
+                           loc='upper left', frameon=True, framealpha=0.9)
+        
+        # Add the first legend to the axes
+        ax.add_artist(legend1)
+        
+        # SECOND LEGEND: Size values (below the first legend, also on the right)
+        # Position it below the first legend using bbox_to_anchor
+        # The first legend is at (1, 1) in axes coordinates (upper right)
+        # We position the second legend at (1, 0.7) to place it below
         legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
-                           loc='upper right', frameon=True, framealpha=0.9)
+                           loc='upper left', 
+                           bbox_to_anchor=(1.0, 0.65),
+                           frameon=True, framealpha=0.9)
         
         # Add the second legend to the axes
         ax.add_artist(legend2)
