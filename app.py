@@ -1,5 +1,5 @@
 # ============================================
-# app.py - Полный код Streamlit приложения с кэшированием
+# app.py - Полный код Streamlit приложения
 # ============================================
 
 import streamlit as st
@@ -654,6 +654,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
         # Use different markers for each category
+        # The size of markers on the plot is controlled by sizes_scaled (Bubble size)
         categories = plot_data[filter_name].unique()
         for cat in categories:
             mask = plot_data[filter_name] == cat
@@ -676,9 +677,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Get existing legend handles and labels from the scatter plot
-        handles, labels = ax.get_legend_handles_labels()
-        
         # Prepare size legend entries
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
@@ -690,16 +688,35 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
-        # Create two separate legend groups using the same axes
+        # Create FIRST LEGEND: Additive categories with FIXED marker size
+        # We create custom Line2D objects for each category with the correct marker shape
+        # but with a fixed, uniform size for the legend
+        category_handles = []
+        category_labels = []
         
-        # FIRST LEGEND: Additive categories with increased transparency
-        legend1 = ax.legend(handles, labels, title='Additive:',
-                           loc='upper left', frameon=True, framealpha=0.75)
+        # Get unique categories in the order they appear in the data
+        unique_categories = plot_data[filter_name].unique()
+        
+        for cat in unique_categories:
+            marker = marker_style.get(cat, 'o')
+            # Create a Line2D object with fixed marker size for legend
+            handle = mlines.Line2D([0], [0], marker=marker, color='w',
+                                  label=cat,
+                                  markersize=10,  # Fixed size for legend
+                                  markerfacecolor='gray',
+                                  markeredgecolor='black',
+                                  linestyle='None')
+            category_handles.append(handle)
+            category_labels.append(cat)
+        
+        # Create first legend with fixed marker sizes
+        legend1 = ax.legend(category_handles, category_labels, title='Additive:',
+                           loc='upper left', frameon=True, framealpha=0.5)
         
         # Add the first legend to the axes
         ax.add_artist(legend1)
         
-        # SECOND LEGEND: Size values with increased transparency
+        # Create SECOND LEGEND: Size values with different bubble sizes
         size_handles = []
         size_labels = []
         for val, size in zip(size_legend_values, size_legend_sizes):
@@ -710,9 +727,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                               markeredgecolor='black'))
             size_labels.append(f'{val:.2f}')
         
-        # Create second legend with increased transparency
+        # Create second legend
         legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
-                           loc='upper right', frameon=True, framealpha=0.75)
+                           loc='upper right', frameon=True, framealpha=0.5)
         
         # Add the second legend to the axes
         ax.add_artist(legend2)
@@ -730,7 +747,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Add size legend only with increased transparency
+        # Add size legend only
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -795,7 +812,7 @@ def main():
     data_input = st.text_area(
         "Paste data here:",
         height=200,
-        key="data_input"  # Add key for session state
+        key="data_input"
     )
     
     # Initialize session state for data
