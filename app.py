@@ -638,6 +638,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             return None
         sizes = np.log10(sizes)
     
+    # Scale bubble sizes for the plot
     if len(sizes) > 0:
         size_min, size_max = sizes.min(), sizes.max()
         if size_max > size_min:
@@ -654,7 +655,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
         # Use different markers for each category
-        # The size of markers on the plot is controlled by sizes_scaled (Bubble size)
         categories = plot_data[filter_name].unique()
         for cat in categories:
             mask = plot_data[filter_name] == cat
@@ -677,61 +677,77 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Prepare size legend entries
+        # Prepare size legend entries with FIXED visual sizes
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
             size_label = plot_data[size_col].name
         
-        size_legend_values = [np.percentile(sizes, 25), np.percentile(sizes, 50), 
-                              np.percentile(sizes, 75)] if len(sizes) > 0 else [1, 2, 3]
-        size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
-                             if sizes.max() > sizes.min() else 50 for v in size_legend_values]
+        # Calculate min, median, max values for the legend
+        size_min_val = sizes.min() if len(sizes) > 0 else 1
+        size_median_val = np.percentile(sizes, 50) if len(sizes) > 0 else 2
+        size_max_val = sizes.max() if len(sizes) > 0 else 3
+        
+        # Fixed marker sizes for legend (always small, medium, large)
+        # These are the actual marker sizes in points
+        LEGEND_SMALL_SIZE = 20
+        LEGEND_MEDIUM_SIZE = 60
+        LEGEND_LARGE_SIZE = 150
         
         # Create FIRST LEGEND: Additive categories with FIXED marker size
-        # We create custom Line2D objects for each category with the correct marker shape
-        # but with a fixed, uniform size for the legend
         category_handles = []
         category_labels = []
         
-        # Get unique categories in the order they appear in the data
         unique_categories = plot_data[filter_name].unique()
         
         for cat in unique_categories:
             marker = marker_style.get(cat, 'o')
-            # Create a Line2D object with fixed marker size for legend
             handle = mlines.Line2D([0], [0], marker=marker, color='w',
                                   label=cat,
-                                  markersize=10,  # Fixed size for legend
+                                  markersize=10,
                                   markerfacecolor='gray',
                                   markeredgecolor='black',
                                   linestyle='None')
             category_handles.append(handle)
             category_labels.append(cat)
         
-        # Create first legend with fixed marker sizes
         legend1 = ax.legend(category_handles, category_labels, title='Additive:',
                            loc='upper left', frameon=True, framealpha=0.5)
         
-        # Add the first legend to the axes
         ax.add_artist(legend1)
         
-        # Create SECOND LEGEND: Size values with different bubble sizes
+        # Create SECOND LEGEND: Size values with FIXED visual sizes
+        # Always show small, medium, large markers regardless of data range
         size_handles = []
         size_labels = []
-        for val, size in zip(size_legend_values, size_legend_sizes):
-            size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                              label=f'{val:.2f}',
-                              markersize=np.sqrt(size/2),
-                              markerfacecolor='gray', 
-                              markeredgecolor='black'))
-            size_labels.append(f'{val:.2f}')
         
-        # Create second legend
+        # Small marker
+        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'Min: {size_min_val:.3f}',
+                          markersize=np.sqrt(LEGEND_SMALL_SIZE/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+        size_labels.append(f'Min: {size_min_val:.3f}')
+        
+        # Medium marker
+        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'Median: {size_median_val:.3f}',
+                          markersize=np.sqrt(LEGEND_MEDIUM_SIZE/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+        size_labels.append(f'Median: {size_median_val:.3f}')
+        
+        # Large marker
+        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'Max: {size_max_val:.3f}',
+                          markersize=np.sqrt(LEGEND_LARGE_SIZE/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+        size_labels.append(f'Max: {size_max_val:.3f}')
+        
         legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
                            loc='upper right', frameon=True, framealpha=0.5)
         
-        # Add the second legend to the axes
         ax.add_artist(legend2)
         
     else:
@@ -747,26 +763,47 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
-        # Add size legend only
+        # Add size legend only with FIXED visual sizes
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
             size_label = plot_data[size_col].name
         
-        size_legend_values = [np.percentile(sizes, 25), np.percentile(sizes, 50), 
-                              np.percentile(sizes, 75)] if len(sizes) > 0 else [1, 2, 3]
-        size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
-                             if sizes.max() > sizes.min() else 50 for v in size_legend_values]
+        size_min_val = sizes.min() if len(sizes) > 0 else 1
+        size_median_val = np.percentile(sizes, 50) if len(sizes) > 0 else 2
+        size_max_val = sizes.max() if len(sizes) > 0 else 3
+        
+        # Fixed marker sizes for legend
+        LEGEND_SMALL_SIZE = 20
+        LEGEND_MEDIUM_SIZE = 60
+        LEGEND_LARGE_SIZE = 150
         
         size_handles = []
         size_labels = []
-        for val, size in zip(size_legend_values, size_legend_sizes):
-            size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                              label=f'{val:.2f}',
-                              markersize=np.sqrt(size/2),
-                              markerfacecolor='gray', 
-                              markeredgecolor='black'))
-            size_labels.append(f'{val:.2f}')
+        
+        # Small marker
+        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'Min: {size_min_val:.3f}',
+                          markersize=np.sqrt(LEGEND_SMALL_SIZE/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+        size_labels.append(f'Min: {size_min_val:.3f}')
+        
+        # Medium marker
+        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'Median: {size_median_val:.3f}',
+                          markersize=np.sqrt(LEGEND_MEDIUM_SIZE/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+        size_labels.append(f'Median: {size_median_val:.3f}')
+        
+        # Large marker
+        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                          label=f'Max: {size_max_val:.3f}',
+                          markersize=np.sqrt(LEGEND_LARGE_SIZE/2),
+                          markerfacecolor='gray', 
+                          markeredgecolor='black'))
+        size_labels.append(f'Max: {size_max_val:.3f}')
         
         ax.legend(size_handles, size_labels, title='Grain size:',
                   loc='upper right', frameon=True, framealpha=0.5)
@@ -777,7 +814,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     plt.tight_layout()
     return fig
-
 # ============================================
 # FUNCTION FOR DOWNLOADING PLOTS
 # ============================================
