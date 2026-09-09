@@ -638,8 +638,8 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
-    # Import here to avoid issues
     import matplotlib.lines as mlines
+    from matplotlib.legend_handler import HandlerLine2D
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
         # Use different markers for each category
@@ -668,7 +668,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         # Get existing legend handles and labels from the scatter plot
         handles, labels = ax.get_legend_handles_labels()
         
-        # Add size legend entries
+        # Prepare size legend entries
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -679,18 +679,32 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
-        # Add size entries to existing handles and labels
-        for val, size in zip(size_legend_values, size_legend_sizes):
-            handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Size: {val:.2f}',
-                          markersize=np.sqrt(size/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-            labels.append(f'Size: {val:.2f}')
+        # Create two separate legend groups using the same axes
         
-        # Create combined legend WITHOUT title
-        ax.legend(handles, labels, title='',
-                  loc='upper right', frameon=True, framealpha=0.9)
+        # FIRST LEGEND: Additive categories
+        legend1 = ax.legend(handles, labels, title='Additive:',
+                           loc='upper left', frameon=True, framealpha=0.9)
+        
+        # Add the first legend to the axes
+        ax.add_artist(legend1)
+        
+        # SECOND LEGEND: Size values
+        size_handles = []
+        size_labels = []
+        for val, size in zip(size_legend_values, size_legend_sizes):
+            size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                              label=f'{val:.2f}',
+                              markersize=np.sqrt(size/2),
+                              markerfacecolor='gray', 
+                              markeredgecolor='black'))
+            size_labels.append(f'{val:.2f}')
+        
+        # Create second legend
+        legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
+                           loc='upper right', frameon=True, framealpha=0.9)
+        
+        # Add the second legend to the axes
+        ax.add_artist(legend2)
         
     else:
         scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
@@ -716,15 +730,17 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
-        legend_elements = []
+        size_handles = []
+        size_labels = []
         for val, size in zip(size_legend_values, size_legend_sizes):
-            legend_elements.append(mlines.Line2D([0], [0], marker='o', color='w',
-                                  label=f'Size: {val:.2f}',
-                                  markersize=np.sqrt(size/2),
-                                  markerfacecolor='gray', 
-                                  markeredgecolor='black'))
+            size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
+                              label=f'{val:.2f}',
+                              markersize=np.sqrt(size/2),
+                              markerfacecolor='gray', 
+                              markeredgecolor='black'))
+            size_labels.append(f'{val:.2f}')
         
-        ax.legend(handles=legend_elements, title='',
+        ax.legend(size_handles, size_labels, title='Grain size:',
                   loc='upper right', frameon=True, framealpha=0.9)
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
