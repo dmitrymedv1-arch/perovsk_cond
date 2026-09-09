@@ -236,163 +236,6 @@ def calculate_ea(row):
         return np.nan
 
 # ============================================
-# FUNCTION FOR SINTERING ADDITIVE ANALYSIS
-# ============================================
-
-def calculate_additive_deltas(df, temp_col_for_sigma=None):
-    """
-    Calculate Δρ, Δd, ΔT, Δσ_diff, Δσ_ratio for additive samples
-    compared to Pure samples within the same DOI reference.
-    """
-    # Create a copy to avoid modifying original
-    df_result = df.copy()
-    
-    # Initialize new columns with NaN
-    df_result['Δρ'] = np.nan
-    df_result['Δd'] = np.nan
-    df_result['ΔT'] = np.nan
-    df_result['Δρ_rel'] = np.nan
-    df_result['Δd_rel'] = np.nan
-    df_result['Δσ_diff'] = np.nan
-    df_result['Δσ_ratio'] = np.nan
-    
-    # Check if required columns exist
-    if 'References' not in df.columns:
-        return df_result
-    
-    if 'Sintering additive' not in df.columns:
-        return df_result
-    
-    # Group by DOI reference
-    for doi, group in df.groupby('References'):
-        # Find Pure samples in this group
-        pure_mask = group['Sintering additive'] == 'Pure'
-        pure_samples = group[pure_mask]
-        
-        if len(pure_samples) == 0:
-            continue
-        
-        # For each additive sample in this group
-        additive_mask = group['Sintering additive'] != 'Pure'
-        additive_samples = group[additive_mask]
-        
-        if len(additive_samples) == 0:
-            continue
-        
-        # For each additive, find matching Pure with same composition
-        for add_idx, add_row in additive_samples.iterrows():
-            # Find Pure sample with same composition (excluding additive)
-            for pure_idx, pure_row in pure_samples.iterrows():
-                # Check if compositions match (all columns except Sintering additive, x, wt%, ρ, d, T sin, and conductivity)
-                composition_match = True
-                comp_columns = ['A cation', 'B1 cation', 'B2 cation', 'B2_cont', 'dopant', 'dop_cont']
-                
-                for col in comp_columns:
-                    if col in df.columns:
-                        if pd.isna(add_row[col]) and pd.isna(pure_row[col]):
-                            continue
-                        elif pd.isna(add_row[col]) or pd.isna(pure_row[col]):
-                            composition_match = False
-                            break
-                        elif add_row[col] != pure_row[col]:
-                            composition_match = False
-                            break
-                
-                if not composition_match:
-                    continue
-                
-                # Calculate Δρ
-                if pd.notna(add_row['ρ, %']) and pd.notna(pure_row['ρ, %']):
-                    df_result.loc[add_idx, 'Δρ'] = add_row['ρ, %'] - pure_row['ρ, %']
-                    df_result.loc[add_idx, 'Δρ_rel'] = (add_row['ρ, %'] - pure_row['ρ, %']) / pure_row['ρ, %'] * 100
-                    df_result.loc[add_idx, 'ρ_pure'] = pure_row['ρ, %']
-                    df_result.loc[add_idx, 'ρ_additive'] = add_row['ρ, %']
-                
-                # Calculate Δd
-                if pd.notna(add_row['d, mkm']) and pd.notna(pure_row['d, mkm']):
-                    df_result.loc[add_idx, 'Δd'] = add_row['d, mkm'] - pure_row['d, mkm']
-                    df_result.loc[add_idx, 'Δd_rel'] = (add_row['d, mkm'] - pure_row['d, mkm']) / pure_row['d, mkm'] * 100
-                    df_result.loc[add_idx, 'd_pure'] = pure_row['d, mkm']
-                    df_result.loc[add_idx, 'd_additive'] = add_row['d, mkm']
-                
-                # Calculate ΔT
-                if pd.notna(add_row['T sin']) and pd.notna(pure_row['T sin']):
-                    df_result.loc[add_idx, 'ΔT'] = pure_row['T sin'] - add_row['T sin']
-                    df_result.loc[add_idx, 'T_sin_pure'] = pure_row['T sin']
-                    df_result.loc[add_idx, 'T_sin_additive'] = add_row['T sin']
-                
-                # Calculate Δσ_diff and Δσ_ratio if temperature is specified
-                if temp_col_for_sigma is not None and temp_col_for_sigma in df.columns:
-                    if pd.notna(add_row[temp_col_for_sigma]) and pd.notna(pure_row[temp_col_for_sigma]):
-                        sigma_add = add_row[temp_col_for_sigma]
-                        sigma_pure = pure_row[temp_col_for_sigma]
-                        df_result.loc[add_idx, 'Δσ_diff'] = sigma_add - sigma_pure
-                        if sigma_pure != 0:
-                            df_result.loc[add_idx, 'Δσ_ratio'] = sigma_add / sigma_pure
-                        else:
-                            df_result.loc[add_idx, 'Δσ_ratio'] = np.nan
-                        df_result.loc[add_idx, 'σ_pure'] = sigma_pure
-                        df_result.loc[add_idx, 'σ_additive'] = sigma_add
-                
-                # Store the pure sample index for reference
-                df_result.loc[add_idx, 'pure_index'] = pure_idx
-                
-                # Only match with the first matching Pure sample
-                break
-    
-    return df_result
-
-# ============================================
-# FUNCTION FOR CORRELATION MATRIX
-# ============================================
-
-def create_correlation_matrix(df, temp_col, data_type='All'):
-    """
-    Create correlation matrix heatmap for selected variables
-    """
-    # Filter data if needed
-    if data_type == 'Additives only':
-        plot_df = df[df['Sintering additive'] != 'Pure'].copy()
-    else:
-        plot_df = df.copy()
-    
-    # Define variables for correlation
-    var_cols = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm', 
-                'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
-                'molar_mass', 'porosity', 'grain_boundary_area']
-    
-    # Add additive delta columns if they exist
-    delta_cols = ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel']
-    for col in delta_cols:
-        if col in plot_df.columns and not plot_df[col].isna().all():
-            var_cols.append(col)
-    
-    # Add Δσ columns if they exist
-    sigma_delta_cols = ['Δσ_diff', 'Δσ_ratio']
-    for col in sigma_delta_cols:
-        if col in plot_df.columns and not plot_df[col].isna().all():
-            var_cols.append(col)
-    
-    # Add conductivity column
-    if temp_col in plot_df.columns:
-        var_cols.append(temp_col)
-    else:
-        return None, "Temperature column not found"
-    
-    # Ensure all columns exist
-    existing_cols = [col for col in var_cols if col in plot_df.columns]
-    
-    # Create correlation matrix
-    corr_df = plot_df[existing_cols].dropna()
-    
-    if len(corr_df) < 3:
-        return None, "Not enough data for correlation (minimum 3 rows with complete data)"
-    
-    corr_matrix = corr_df.corr()
-    
-    return corr_matrix, None
-
-# ============================================
 # FUNCTION FOR OUTLIER REMOVAL
 # ============================================
 
@@ -407,11 +250,13 @@ def remove_outliers(df, col, n):
     if col not in df.columns:
         return df
     
+    # Get unique values sorted
     unique_vals = sorted(df[col].dropna().unique())
     
     if len(unique_vals) <= 2 * n:
         return df
     
+    # Determine which values to remove from the low end
     low_vals_to_remove = []
     for i in range(min(n, len(unique_vals))):
         val = unique_vals[i]
@@ -421,6 +266,7 @@ def remove_outliers(df, col, n):
         else:
             break
     
+    # Determine which values to remove from the high end
     high_vals_to_remove = []
     for i in range(min(n, len(unique_vals))):
         val = unique_vals[-(i+1)]
@@ -430,6 +276,7 @@ def remove_outliers(df, col, n):
         else:
             break
     
+    # Create filter mask
     mask = pd.Series(True, index=df.index)
     if low_vals_to_remove:
         mask = mask & ~df[col].isin(low_vals_to_remove)
@@ -448,10 +295,13 @@ def get_filter_markers(df, active_filters_count):
     Returns: marker_style (string or dict), show_legend (bool)
     """
     if active_filters_count == 1:
+        # Find which filter is active
         for filter_name, marker_dict in MARKER_MAP.items():
             if filter_name in df.columns:
+                # Check if this filter has more than one unique value
                 unique_vals = df[filter_name].dropna().unique()
                 if len(unique_vals) > 1:
+                    # Return the marker dictionary for this filter
                     return marker_dict, True
         return 'o', False
     else:
@@ -506,6 +356,7 @@ def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
     fig, ax = plt.subplots(figsize=(8, 6))
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
+        # Use different markers for each category
         categories = plot_data[filter_name].unique()
         for cat in categories:
             mask = plot_data[filter_name] == cat
@@ -515,6 +366,7 @@ def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
                           s=50, marker=marker, edgecolors='black', 
                           linewidth=0.5, alpha=0.8, label=cat)
         
+        # Create colorbar from all data
         scatter = ax.scatter(x, y, c=z, cmap=palette, s=50, 
                             edgecolors='black', linewidth=0.5, alpha=0.8, visible=False)
         cbar = plt.colorbar(scatter, ax=ax)
@@ -597,14 +449,17 @@ def create_contour_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
+    # Create filled contour with smooth color transition
     contour = ax.contourf(xi, yi, zi, levels=30, cmap=palette, alpha=0.85)
     
+    # Add contour lines if requested
     if show_contour_lines:
         contour_lines = ax.contour(xi, yi, zi, levels=15, colors='black', 
                                    linewidths=0.5, alpha=0.4)
         if show_contour_labels:
             ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.2f')
     
+    # Plot original data points
     ax.scatter(x, y, color='red', s=30, edgecolors='white', 
                linewidth=1, alpha=0.7, label='Data points')
     
@@ -767,9 +622,11 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
+    # Import here to avoid issues
     import matplotlib.lines as mlines
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
+        # Use different markers for each category
         categories = plot_data[filter_name].unique()
         for cat in categories:
             mask = plot_data[filter_name] == cat
@@ -780,6 +637,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           marker=marker, alpha=0.7, edgecolors='black', 
                           linewidth=0.5, label=cat)
         
+        # Create colorbar from all data
         scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
                             cmap=palette, alpha=0.7, edgecolors='black', 
                             linewidth=0.5, visible=False)
@@ -791,8 +649,10 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
+        # Get existing legend handles and labels from the scatter plot
         handles, labels = ax.get_legend_handles_labels()
         
+        # Add size legend entries
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -803,6 +663,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         size_legend_sizes = [20 + 180 * (v - sizes.min()) / (sizes.max() - sizes.min()) 
                              if sizes.max() > sizes.min() else 50 for v in size_legend_values]
         
+        # Add size entries to existing handles and labels
         for val, size in zip(size_legend_values, size_legend_sizes):
             handles.append(mlines.Line2D([0], [0], marker='o', color='w',
                           label=f'Size: {val:.2f}',
@@ -811,6 +672,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           markeredgecolor='black'))
             labels.append(f'Size: {val:.2f}')
         
+        # Create combined legend WITHOUT title
         ax.legend(handles, labels, title='',
                   loc='upper right', frameon=True, framealpha=0.9)
         
@@ -827,6 +689,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             cbar.set_label(plot_data[color_col].name, 
                           fontsize=11, fontweight='bold')
         
+        # Add size legend only
         if size_log:
             size_label = f'log10({plot_data[size_col].name})'
         else:
@@ -850,101 +713,6 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
-    ax.grid(True, alpha=0.3, linestyle='--')
-    
-    plt.tight_layout()
-    return fig
-
-def create_additive_effect_plot(df, x_col, y_col, color_col, 
-                                x_log, y_log, palette,
-                                title, xlabel, ylabel):
-    """
-    Create a scatter plot for additive effect analysis
-    """
-    plot_data = df.dropna(subset=[x_col, y_col, color_col])
-    
-    if len(plot_data) == 0:
-        st.warning("No data available for plotting")
-        return None
-    
-    x = plot_data[x_col].values
-    y = plot_data[y_col].values
-    colors = plot_data[color_col].values
-    
-    if x_log:
-        mask = x > 0
-        x = x[mask]
-        y = y[mask]
-        colors = colors[mask]
-        if len(x) == 0:
-            st.warning("All x values ≤ 0, cannot create logarithmic plot")
-            return None
-        x = np.log10(x)
-        xlabel = f'log10({xlabel})'
-    
-    if y_log:
-        mask = y > 0
-        x = x[mask]
-        y = y[mask]
-        colors = colors[mask]
-        if len(y) == 0:
-            st.warning("All y values ≤ 0, cannot create logarithmic plot")
-            return None
-        y = np.log10(y)
-        ylabel = f'log10({ylabel})'
-    
-    fig, ax = plt.subplots(figsize=(8, 6))
-    
-    # Get unique additive types
-    unique_additives = plot_data[color_col].unique()
-    
-    # Marker mapping for additive types
-    additive_markers = {
-        'Cu': 's',
-        'Ni': 'D',
-        'Zn': '*',
-        'Pure': 'o',
-        'Fe': '^',
-        'Co': 'v',
-        'Mn': '<',
-        'Cr': '>',
-        'Ag': 'p',
-        'Au': 'P',
-        'Pt': 'X'
-    }
-    
-    # Color mapping for additives
-    additive_colors = {
-        'Cu': '#FF6B6B',
-        'Ni': '#4ECDC4',
-        'Zn': '#45B7D1',
-        'Pure': '#95A5A6',
-        'Fe': '#FFA07A',
-        'Co': '#98D8C8',
-        'Mn': '#F7DC6F',
-        'Cr': '#BB8FCE',
-        'Ag': '#F1948A',
-        'Au': '#F9E79F',
-        'Pt': '#A9CCE3'
-    }
-    
-    for additive in unique_additives:
-        mask = plot_data[color_col] == additive
-        if mask.sum() > 0:
-            marker = additive_markers.get(additive, 'o')
-            color = additive_colors.get(additive, 'gray')
-            ax.scatter(x[mask], y[mask], 
-                      s=80, marker=marker, color=color,
-                      edgecolors='black', linewidth=1, 
-                      alpha=0.8, label=additive)
-    
-    # Add a horizontal line at y=0 if y is Δσ_diff or Δρ or Δd
-    if 'Δ' in y_col and 'ratio' not in y_col:
-        ax.axhline(y=0, color='red', linestyle='--', linewidth=1, alpha=0.5)
-    
-    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
-    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
-    ax.legend(loc='upper right', frameon=True, framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
@@ -1032,46 +800,9 @@ def main():
         
         st.success("✅ Ea calculated")
     
-    # ============================================
-    # SINTERING ADDITIVE DELTAS CALCULATION
-    # ============================================
-    with st.spinner("Calculating additive deltas (Δρ, Δd, ΔT, Δσ)..."):
-        # Determine which temperature columns exist for Δσ calculation
-        temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
-                    'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
-                    'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
-                    'σ total, 800', 'σ total, 850', 'σ total, 900']
-        
-        available_temp_cols = [col for col in temp_cols if col in df.columns]
-        
-        # Calculate deltas for each temperature column
-        df_with_deltas = df.copy()
-        for temp_col in available_temp_cols:
-            df_temp = calculate_additive_deltas(df, temp_col)
-            # Update Δσ columns only (other deltas are same for all temperatures)
-            if 'Δσ_diff' in df_temp.columns:
-                df_with_deltas.loc[df_temp.index, 'Δσ_diff'] = df_temp.loc[df_temp.index, 'Δσ_diff']
-            if 'Δσ_ratio' in df_temp.columns:
-                df_with_deltas.loc[df_temp.index, 'Δσ_ratio'] = df_temp.loc[df_temp.index, 'Δσ_ratio']
-            if 'σ_pure' in df_temp.columns:
-                df_with_deltas.loc[df_temp.index, 'σ_pure'] = df_temp.loc[df_temp.index, 'σ_pure']
-            if 'σ_additive' in df_temp.columns:
-                df_with_deltas.loc[df_temp.index, 'σ_additive'] = df_temp.loc[df_temp.index, 'σ_additive']
-        
-        # Calculate non-temperature dependent deltas once
-        df_temp = calculate_additive_deltas(df)
-        delta_cols = ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel', 'ρ_pure', 'ρ_additive', 
-                      'd_pure', 'd_additive', 'T_sin_pure', 'T_sin_additive', 'pure_index']
-        for col in delta_cols:
-            if col in df_temp.columns:
-                df_with_deltas.loc[df_temp.index, col] = df_temp.loc[df_temp.index, col]
-        
-        df = df_with_deltas
-        
-        st.success("✅ Additive deltas calculated")
-    
-    st.dataframe(df[['References', 'Sintering additive', 'Δρ', 'Δd', 'ΔT', 
-                    'Δσ_diff', 'Δσ_ratio']].head(10))
+    st.dataframe(df[['References', 'tolerance_factor', 'chi_B_avg', 
+                    'chi_ratio', 'molar_mass', 'porosity', 
+                    'grain_boundary_area', 'Ea_final']].head(10))
     
     # ============================================
     # SECTION C: Filters (sidebar)
@@ -1081,13 +812,6 @@ def main():
     
     active_filters_count = 0
     active_filter_name = None
-    
-    # Data type filter for correlation matrix and additive analysis
-    data_type_filter = st.sidebar.selectbox(
-        "Data type for analysis",
-        options=['All data', 'Additives only'],
-        index=0
-    )
     
     if 'Atmospheres' in df.columns:
         atmos_options = sorted([x for x in df['Atmospheres'].unique() 
@@ -1197,13 +921,7 @@ def main():
     # ============================================
     # MAIN TABS
     # ============================================
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🌡️ Heat Maps", 
-        "🫧 Bubble Charts", 
-        "📊 Correlation Matrix",
-        "🔬 Additive Analysis",
-        "📋 Data"
-    ])
+    tab1, tab2, tab3 = st.tabs(["🌡️ Heat Maps", "🫧 Bubble Charts", "📋 Data"])
     
     # ============================================
     # TAB 1: HEAT MAPS
@@ -1214,12 +932,6 @@ def main():
         numeric_cols = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm', 
                        'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
                        'molar_mass', 'porosity', 'grain_boundary_area']
-        
-        # Add delta columns if they exist
-        delta_cols_plot = ['Δρ', 'Δd', 'ΔT', 'Δρ_rel', 'Δd_rel', 'Δσ_diff', 'Δσ_ratio']
-        for col in delta_cols_plot:
-            if col in df_filtered.columns and not df_filtered[col].isna().all():
-                numeric_cols.append(col)
         
         temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
                     'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
@@ -1263,6 +975,7 @@ def main():
                 index=0
             )
         
+        # Outlier removal controls for X and Y
         col1, col2 = st.columns(2)
         with col1:
             outlier_x = st.selectbox(
@@ -1279,17 +992,12 @@ def main():
                 format_func=lambda x: 'None' if x == 0 else str(x)
             )
         
-        # Apply data type filter
-        if data_type_filter == 'Additives only':
-            df_plot_heat = df_filtered[df_filtered['Sintering additive'] != 'Pure'].copy()
-        else:
-            df_plot_heat = df_filtered.copy()
-        
         # Apply outlier removal
+        df_plot = df_filtered.copy()
         if outlier_x > 0:
-            df_plot_heat = remove_outliers(df_plot_heat, x_axis, outlier_x)
+            df_plot = remove_outliers(df_plot, x_axis, outlier_x)
         if outlier_y > 0:
-            df_plot_heat = remove_outliers(df_plot_heat, y_axis, outlier_y)
+            df_plot = remove_outliers(df_plot, y_axis, outlier_y)
         
         if z_axis in available_temp_cols:
             selected_temp = st.selectbox(
@@ -1316,6 +1024,7 @@ def main():
         )
         palette = COLOR_PALETTES[palette_name]
         
+        # Additional controls for contour plot
         if plot_type == 'Contour plot':
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -1344,28 +1053,29 @@ def main():
             log_z = st.checkbox("log10(Z)", value=False)
         
         if st.button("Generate Heat Map", key="heatmap_btn"):
-            if len(df_plot_heat) == 0:
+            if len(df_plot) == 0:
                 st.warning("No data available after filtering")
             else:
-                marker_style, show_legend = get_filter_markers(df_plot_heat, active_filters_count)
+                # Determine marker style based on active filters
+                marker_style, show_legend = get_filter_markers(df_plot, active_filters_count)
                 
                 if plot_type == 'Scatter with color scale':
                     fig = create_scatter_heatmap(
-                        df_plot_heat, x_axis, y_axis, z_col,
+                        df_plot, x_axis, y_axis, z_col,
                         log_x, log_y, log_z, palette,
                         '', x_axis, y_axis, z_label,
                         marker_style, show_legend, active_filter_name
                     )
                 elif plot_type == 'Contour plot':
                     fig = create_contour_heatmap(
-                        df_plot_heat, x_axis, y_axis, z_col,
+                        df_plot, x_axis, y_axis, z_col,
                         log_x, log_y, log_z, palette,
                         '', x_axis, y_axis, z_label,
                         grid_resolution, show_contour_lines, show_contour_labels
                     )
                 else:
                     fig = create_3d_surface(
-                        df_plot_heat, x_axis, y_axis, z_col,
+                        df_plot, x_axis, y_axis, z_col,
                         log_x, log_y, log_z, palette,
                         '', x_axis, y_axis, z_label
                     )
@@ -1392,11 +1102,6 @@ def main():
         numeric_cols_bubble = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm', 
                               'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
                               'molar_mass', 'porosity', 'grain_boundary_area']
-        
-        # Add delta columns if they exist
-        for col in delta_cols_plot:
-            if col in df_filtered.columns and not df_filtered[col].isna().all():
-                numeric_cols_bubble.append(col)
         
         y_options = available_temp_cols + ['Ea_final']
         
@@ -1438,6 +1143,7 @@ def main():
                 index=0
             )
         
+        # Outlier removal controls for X and Y in bubble charts
         col1, col2 = st.columns(2)
         with col1:
             outlier_x_bubble = st.selectbox(
@@ -1456,13 +1162,8 @@ def main():
                 key="outlier_y_bubble"
             )
         
-        # Apply data type filter
-        if data_type_filter == 'Additives only':
-            df_plot_bubble = df_filtered[df_filtered['Sintering additive'] != 'Pure'].copy()
-        else:
-            df_plot_bubble = df_filtered.copy()
-        
         # Apply outlier removal
+        df_plot_bubble = df_filtered.copy()
         if outlier_x_bubble > 0:
             df_plot_bubble = remove_outliers(df_plot_bubble, x_axis_bubble, outlier_x_bubble)
         if outlier_y_bubble > 0:
@@ -1508,6 +1209,7 @@ def main():
                 else:
                     size_col_bubble = size_axis
                 
+                # Determine marker style based on active filters
                 marker_style, show_legend = get_filter_markers(df_plot_bubble, active_filters_count)
                 
                 fig = create_bubble_chart(
@@ -1532,368 +1234,9 @@ def main():
                     plt.close(fig)
     
     # ============================================
-    # TAB 3: CORRELATION MATRIX
+    # TAB 3: DATA
     # ============================================
     with tab3:
-        st.header("📊 Correlation Matrix")
-        
-        # Select temperature for correlation
-        temp_cols_corr = available_temp_cols + ['Ea_final']
-        
-        if temp_cols_corr:
-            default_corr = temp_cols_corr[0] if len(temp_cols_corr) > 0 else None
-            selected_corr_temp = st.selectbox(
-                "Select variable for correlation analysis",
-                options=temp_cols_corr,
-                index=0 if default_corr is not None else 0
-            )
-        else:
-            st.warning("No conductivity or Ea data available for correlation analysis")
-            selected_corr_temp = None
-        
-        if selected_corr_temp is not None:
-            if st.button("Generate Correlation Matrix", key="corr_btn"):
-                corr_matrix, error = create_correlation_matrix(
-                    df_filtered, 
-                    selected_corr_temp, 
-                    data_type_filter
-                )
-                
-                if corr_matrix is not None:
-                    # Plot correlation matrix
-                    fig, ax = plt.subplots(figsize=(12, 10))
-                    
-                    im = ax.imshow(corr_matrix.values, cmap='coolwarm', 
-                                  vmin=-1, vmax=1, aspect='auto')
-                    
-                    # Set ticks and labels
-                    ax.set_xticks(np.arange(len(corr_matrix.columns)))
-                    ax.set_yticks(np.arange(len(corr_matrix.index)))
-                    ax.set_xticklabels(corr_matrix.columns, rotation=45, ha='right', fontsize=8)
-                    ax.set_yticklabels(corr_matrix.index, fontsize=8)
-                    
-                    # Add correlation values
-                    for i in range(len(corr_matrix.index)):
-                        for j in range(len(corr_matrix.columns)):
-                            text = ax.text(j, i, f'{corr_matrix.iloc[i, j]:.2f}',
-                                         ha="center", va="center", color="black", fontsize=8)
-                    
-                    # Colorbar
-                    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
-                    cbar.set_label('Pearson Correlation Coefficient', fontsize=11, fontweight='bold')
-                    
-                    # Title
-                    if data_type_filter == 'Additives only':
-                        title = f'Correlation Matrix - Additives Only (Variable: {selected_corr_temp})'
-                    else:
-                        title = f'Correlation Matrix - All Data (Variable: {selected_corr_temp})'
-                    ax.set_title(title, fontsize=12, fontweight='bold')
-                    
-                    plt.tight_layout()
-                    
-                    st.pyplot(fig)
-                    
-                    buf = download_plot(fig, "correlation_matrix.png")
-                    st.download_button(
-                        label="📥 Download Plot (PNG, 600 dpi)",
-                        data=buf,
-                        file_name="correlation_matrix.png",
-                        mime="image/png"
-                    )
-                    
-                    plt.close(fig)
-                    
-                    # Show correlation data table
-                    with st.expander("Show correlation data"):
-                        st.dataframe(corr_matrix)
-                else:
-                    st.warning(error)
-    
-    # ============================================
-    # TAB 4: ADDITIVE ANALYSIS
-    # ============================================
-    with tab4:
-        st.header("🔬 Sintering Additives Analysis")
-        
-        # Filter only additive samples with delta values
-        additive_df = df_filtered[
-            (df_filtered['Sintering additive'] != 'Pure') & 
-            (df_filtered['Δρ'].notna() | df_filtered['Δd'].notna() | df_filtered['ΔT'].notna())
-        ].copy()
-        
-        if len(additive_df) == 0:
-            st.warning("No additive samples with delta values found. Make sure your data contains pairs of Pure and additive samples within the same DOI reference.")
-        else:
-            # Display table of additive samples
-            st.subheader("Additive Samples with Calculated Deltas")
-            
-            display_cols = ['References', 'Sintering additive', 'x, wt%', 
-                           'T_sin_pure', 'T_sin_additive', 'ΔT',
-                           'ρ_pure', 'ρ_additive', 'Δρ', 'Δρ_rel',
-                           'd_pure', 'd_additive', 'Δd', 'Δd_rel',
-                           'σ_pure', 'σ_additive', 'Δσ_diff', 'Δσ_ratio']
-            
-            available_display_cols = [col for col in display_cols if col in additive_df.columns]
-            
-            st.dataframe(additive_df[available_display_cols])
-            
-            # Filters for additive analysis
-            st.subheader("Additive Analysis Filters")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                additive_types = sorted(additive_df['Sintering additive'].unique())
-                selected_add_types = st.multiselect(
-                    "Select additive types",
-                    options=['All'] + additive_types,
-                    default=['All']
-                )
-                if 'All' not in selected_add_types:
-                    additive_df = additive_df[additive_df['Sintering additive'].isin(selected_add_types)]
-            
-            with col2:
-                if 'Δρ' in additive_df.columns and not additive_df['Δρ'].isna().all():
-                    rho_min = float(additive_df['Δρ'].min())
-                    rho_max = float(additive_df['Δρ'].max())
-                    if rho_max > rho_min:
-                        rho_range = st.slider(
-                            "Δρ range",
-                            min_value=rho_min,
-                            max_value=rho_max,
-                            value=(rho_min, rho_max)
-                        )
-                        additive_df = additive_df[(additive_df['Δρ'] >= rho_range[0]) & 
-                                                 (additive_df['Δρ'] <= rho_range[1])]
-            
-            with col3:
-                if 'Δd' in additive_df.columns and not additive_df['Δd'].isna().all():
-                    d_min = float(additive_df['Δd'].min())
-                    d_max = float(additive_df['Δd'].max())
-                    if d_max > d_min:
-                        d_range = st.slider(
-                            "Δd range",
-                            min_value=d_min,
-                            max_value=d_max,
-                            value=(d_min, d_max)
-                        )
-                        additive_df = additive_df[(additive_df['Δd'] >= d_range[0]) & 
-                                                 (additive_df['Δd'] <= d_range[1])]
-            
-            st.markdown(f"**Additive samples after filtering: {len(additive_df)}**")
-            
-            if len(additive_df) > 0:
-                # Select temperature for conductivity comparison
-                temp_cols_add = [col for col in available_temp_cols if col in additive_df.columns]
-                
-                if temp_cols_add:
-                    selected_temp_add = st.selectbox(
-                        "Select temperature for conductivity comparison",
-                        options=temp_cols_add,
-                        index=0
-                    )
-                    
-                    # Calculate Δσ for selected temperature
-                    if 'σ_pure' in additive_df.columns and 'σ_additive' in additive_df.columns:
-                        # Use existing Δσ if it matches the selected temperature
-                        # Otherwise, we need to recalculate
-                        pass
-                    
-                    # Create plots for additive effectiveness
-                    st.subheader("Additive Effectiveness Plots")
-                    
-                    plot_types = ['Δρ vs Δσ', 'Δd vs Δσ', 'ΔT vs Δσ', 'x, wt% vs Δσ']
-                    selected_plot = st.selectbox(
-                        "Select plot type",
-                        options=plot_types,
-                        index=0
-                    )
-                    
-                    # Prepare data for plotting
-                    plot_df = additive_df.dropna(subset=[selected_temp_add])
-                    
-                    if len(plot_df) == 0:
-                        st.warning("No data available for selected temperature")
-                    else:
-                        # Calculate Δσ for the selected temperature if not already present
-                        if 'Δσ_diff' not in plot_df.columns or plot_df['Δσ_diff'].isna().all():
-                            # Create temporary Δσ columns
-                            plot_df['temp_Δσ_diff'] = plot_df[selected_temp_add] - plot_df['σ_pure']
-                            plot_df['temp_Δσ_ratio'] = plot_df[selected_temp_add] / plot_df['σ_pure']
-                            y_col_diff = 'temp_Δσ_diff'
-                            y_col_ratio = 'temp_Δσ_ratio'
-                        else:
-                            y_col_diff = 'Δσ_diff'
-                            y_col_ratio = 'Δσ_ratio'
-                        
-                        if selected_plot == 'Δρ vs Δσ':
-                            if 'Δρ' in plot_df.columns and not plot_df['Δρ'].isna().all():
-                                # Plot Δρ vs Δσ_diff
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'Δρ', y_col_diff, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'Δρ (density change)', 'Δσ_diff (mS/cm)'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_rho_vs_sigma.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_rho_vs_sigma.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                                
-                                # Plot Δρ vs Δσ_ratio
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'Δρ', y_col_ratio, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'Δρ (density change)', 'Δσ_ratio'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_rho_vs_sigma_ratio.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_rho_vs_sigma_ratio.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                            else:
-                                st.warning("Δρ data not available")
-                        
-                        elif selected_plot == 'Δd vs Δσ':
-                            if 'Δd' in plot_df.columns and not plot_df['Δd'].isna().all():
-                                # Plot Δd vs Δσ_diff
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'Δd', y_col_diff, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'Δd (grain size change)', 'Δσ_diff (mS/cm)'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_d_vs_sigma.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_d_vs_sigma.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                                
-                                # Plot Δd vs Δσ_ratio
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'Δd', y_col_ratio, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'Δd (grain size change)', 'Δσ_ratio'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_d_vs_sigma_ratio.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_d_vs_sigma_ratio.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                            else:
-                                st.warning("Δd data not available")
-                        
-                        elif selected_plot == 'ΔT vs Δσ':
-                            if 'ΔT' in plot_df.columns and not plot_df['ΔT'].isna().all():
-                                # Plot ΔT vs Δσ_diff
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'ΔT', y_col_diff, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'ΔT (temperature reduction, °C)', 'Δσ_diff (mS/cm)'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_T_vs_sigma.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_T_vs_sigma.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                                
-                                # Plot ΔT vs Δσ_ratio
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'ΔT', y_col_ratio, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'ΔT (temperature reduction, °C)', 'Δσ_ratio'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_T_vs_sigma_ratio.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_T_vs_sigma_ratio.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                            else:
-                                st.warning("ΔT data not available")
-                        
-                        elif selected_plot == 'x, wt% vs Δσ':
-                            if 'x, wt%' in plot_df.columns and not plot_df['x, wt%'].isna().all():
-                                # Plot x, wt% vs Δσ_diff
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'x, wt%', y_col_diff, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'Additive concentration, wt%', 'Δσ_diff (mS/cm)'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_x_vs_sigma.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_x_vs_sigma.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                                
-                                # Plot x, wt% vs Δσ_ratio
-                                fig = create_additive_effect_plot(
-                                    plot_df, 'x, wt%', y_col_ratio, 'Sintering additive',
-                                    False, False, palette_bubble,
-                                    '', 'Additive concentration, wt%', 'Δσ_ratio'
-                                )
-                                if fig is not None:
-                                    st.pyplot(fig)
-                                    buf = download_plot(fig, "additive_x_vs_sigma_ratio.png")
-                                    st.download_button(
-                                        label="📥 Download Plot (PNG, 600 dpi)",
-                                        data=buf,
-                                        file_name="additive_x_vs_sigma_ratio.png",
-                                        mime="image/png"
-                                    )
-                                    plt.close(fig)
-                            else:
-                                st.warning("x, wt% data not available")
-                    
-                    # Download additive data
-                    st.subheader("Download Additive Data")
-                    csv_data_add = additive_df.to_csv(index=False, sep='\t')
-                    st.download_button(
-                        label="📥 Download Additive Data (TSV)",
-                        data=csv_data_add,
-                        file_name="additive_data.tsv",
-                        mime="text/tab-separated-values"
-                    )
-            else:
-                st.warning("No additive samples after filtering")
-    
-    # ============================================
-    # TAB 5: DATA
-    # ============================================
-    with tab5:
         st.header("📋 Data with Calculated Descriptors")
         
         st.dataframe(df_filtered)
