@@ -435,7 +435,7 @@ def _plot_kde_marginal(ax, groups, ylabel, normalize, title):
             continue
         if normalize:
             # Normalize density to integrate to 1 over y_grid
-            area = np.trapz(dens, y_grid)
+             area = np.trapezoid(dens, y_grid)
             if area > 0:
                 dens = dens / area
         color = cmap(i / max(1, n_groups - 1)) if n_groups > 1 else cmap(0.0)
