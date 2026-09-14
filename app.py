@@ -12,6 +12,7 @@ import io
 import warnings
 from scipy.optimize import curve_fit
 from scipy.interpolate import griddata
+from scipy.stats import gaussian_kde
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib
@@ -57,6 +58,35 @@ COLOR_PALETTES = {
     'Spectral': 'Spectral',
     'Coolwarm': 'coolwarm'
 }
+
+# Human-readable labels for numeric descriptors (used in legend titles)
+COLUMN_LABELS = {
+    'dop_cont': 'Dopant content',
+    'x, wt%': 'Sintering additive concentration',
+    'ρ, %': 'Density',
+    'd, mkm': 'Grain size',
+    'tolerance_factor': 'Tolerance factor',
+    'chi_B_avg': 'Average electronegativity (B-site)',
+    'chi_ratio': 'Electronegativity ratio',
+    'molar_mass': 'Molar mass',
+    'porosity': 'Porosity',
+    'grain_boundary_area': 'Grain boundary area',
+    'Ea_final': 'Activation energy',
+    'Ea_calculated': 'Activation energy (calculated)',
+    'T sin': 'Sintering temperature',
+    'T sin, °C': 'Sintering temperature',
+}
+
+# Human-readable labels for filter columns (used in legend titles)
+FILTER_LABELS = {
+    'Sintering additive': 'Sintering additive',
+    'Atmospheres': 'Atmosphere',
+    'Humidity': 'Humidity',
+    'Structure': 'Structure',
+}
+
+# Common marker set used for every active filter (order matters)
+COMMON_MARKERS = ['o', 's', 'D', '*', '^']
 
 # Marker dictionaries for different filters
 MARKER_MAP = {
@@ -319,20 +349,107 @@ def remove_outliers(df, col, n):
 def get_filter_markers(df, active_filters_count):
     """
     Determine if custom markers should be used based on active filters count.
-    Returns: marker_style (string or dict), show_legend (bool)
+    Returns: (marker_dict or 'o', show_legend (bool), filter_name (str or None))
+
+    Only one filter is used to control marker shapes. When exactly one filter is
+    active (i.e. its categories really split the data), that filter's categories
+    receive markers from COMMON_MARKERS in order. If several filters are active,
+    marker shapes are NOT shown (show_legend=False).
     """
-    if active_filters_count == 1:
-        # Find which filter is active
-        for filter_name, marker_dict in MARKER_MAP.items():
-            if filter_name in df.columns:
-                # Check if this filter has more than one unique value
-                unique_vals = df[filter_name].dropna().unique()
-                if len(unique_vals) > 1:
-                    # Return the marker dictionary for this filter
-                    return marker_dict, True
-        return 'o', False
-    else:
-        return 'o', False
+    if active_filters_count != 1:
+        return 'o', False, None
+
+    # Find which filter is active (has more than one unique value)
+    for filter_name in FILTER_LABELS.keys():
+        if filter_name in df.columns:
+            unique_vals = df[filter_name].dropna().unique()
+            unique_vals = [v for v in unique_vals if v != '']
+            if len(unique_vals) > 1:
+                # Build marker dict using COMMON_MARKERS in the order of categories
+                marker_dict = {}
+                for i, cat in enumerate(unique_vals):
+                    marker_dict[cat] = COMMON_MARKERS[i % len(COMMON_MARKERS)]
+                return marker_dict, True, filter_name
+
+    return 'o', False, None
+
+
+def _humanize_size_label(size_col_name):
+    """Return a human-readable label for a size descriptor column."""
+    if size_col_name in COLUMN_LABELS:
+        return COLUMN_LABELS[size_col_name]
+    return size_col_name
+
+
+def _humanize_filter_label(filter_name):
+    """Return a human-readable label for a filter column."""
+    if filter_name in FILTER_LABELS:
+        return FILTER_LABELS[filter_name]
+    return filter_name
+
+
+def _plot_kde_marginal(ax, groups, ylabel, normalize, title):
+    """
+    Plot smoothed KDE marginals on the given axes.
+
+    groups: list of (label, values_array) tuples.
+    normalize: if True, each KDE is normalized to integrate to 1 inside its group
+               (gaussian_kde is already normalized per-sample, so we still scale
+               so that each group's density integrates to 1 over the plot range).
+    """
+    y_min = None
+    y_max = None
+    for _, vals in groups:
+        vals = np.asarray(vals)
+        vals = vals[np.isfinite(vals)]
+        if len(vals) == 0:
+            continue
+        if y_min is None or vals.min() < y_min:
+            y_min = vals.min()
+        if y_max is None or vals.max() > y_max:
+            y_max = vals.max()
+
+    if y_min is None or y_max is None:
+        ax.text(0.5, 0.5, 'No data', ha='center', va='center',
+                transform=ax.transAxes, fontsize=9)
+        ax.set_title(title, fontsize=10, fontweight='bold')
+        ax.set_xlabel(ylabel, fontsize=9, fontweight='bold')
+        return
+
+    span = y_max - y_min
+    if span <= 0:
+        span = 1.0
+    y_grid = np.linspace(y_min - 0.1 * span, y_max + 0.1 * span, 200)
+
+    cmap = plt.get_cmap('viridis')
+    n_groups = max(1, len(groups))
+    for i, (label, vals) in enumerate(groups):
+        vals = np.asarray(vals)
+        vals = vals[np.isfinite(vals)]
+        if len(vals) < 2:
+            continue
+        try:
+            kde = gaussian_kde(vals)
+            dens = kde(y_grid)
+        except Exception:
+            continue
+        if normalize:
+            # Normalize density to integrate to 1 over y_grid
+            area = np.trapz(dens, y_grid)
+            if area > 0:
+                dens = dens / area
+        color = cmap(i / max(1, n_groups - 1)) if n_groups > 1 else cmap(0.0)
+        ax.fill_betweenx(y_grid, 0, dens, color=color, alpha=0.35, label=label)
+        ax.plot(dens, y_grid, color=color, linewidth=1.5)
+
+    ax.set_title(title, fontsize=10, fontweight='bold')
+    ax.set_xlabel('Density' if not normalize else 'Normalized density',
+                  fontsize=9, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=9, fontweight='bold')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    if len(groups) > 0:
+        ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.5)
+
 
 def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log, 
                            palette, title, xlabel, ylabel, zlabel,
@@ -580,12 +697,27 @@ def create_3d_surface(df, x_col, y_col, z_col, x_log, y_log, z_log,
 def create_bubble_chart(df, x_col, y_col, color_col, size_col, 
                         x_log, y_log, color_log, size_log,
                         palette, title, xlabel, ylabel,
-                        marker_style='o', show_legend=False, filter_name=None):
-    plot_data = df.dropna(subset=[x_col, y_col, color_col, size_col])
+                        marker_style='o', show_legend=False, filter_name=None,
+                        size_col_name=None, filter_display_name=None,
+                        show_marginals=False, normalize_marginals=False,
+                        size_col_raw=None, y_col_raw=None):
+    plot_data = df.dropna(subset=[x_col, y_col, color_col, size_col]).copy()
     
     if len(plot_data) == 0:
         st.warning("No data available for plotting")
         return None
+    
+    # Keep raw size for terciles (before log transform)
+    if size_col_raw is not None and size_col_raw in plot_data.columns:
+        raw_size_series = plot_data[size_col_raw].copy()
+    else:
+        raw_size_series = plot_data[size_col].copy()
+    
+    # Keep raw y for marginals (before log transform)
+    if y_col_raw is not None and y_col_raw in plot_data.columns:
+        raw_y_series = plot_data[y_col_raw].copy()
+    else:
+        raw_y_series = plot_data[y_col].copy()
     
     x = plot_data[x_col].values
     y = plot_data[y_col].values
@@ -598,6 +730,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         y = y[mask]
         colors = colors[mask]
         sizes = sizes[mask]
+        plot_data = plot_data[mask]
+        raw_size_series = raw_size_series[mask]
+        raw_y_series = raw_y_series[mask]
         if len(x) == 0:
             st.warning("All x values ≤ 0, cannot create logarithmic plot")
             return None
@@ -610,6 +745,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         y = y[mask]
         colors = colors[mask]
         sizes = sizes[mask]
+        plot_data = plot_data[mask]
+        raw_size_series = raw_size_series[mask]
+        raw_y_series = raw_y_series[mask]
         if len(y) == 0:
             st.warning("All y values ≤ 0, cannot create logarithmic plot")
             return None
@@ -622,6 +760,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         y = y[mask]
         colors = colors[mask]
         sizes = sizes[mask]
+        plot_data = plot_data[mask]
+        raw_size_series = raw_size_series[mask]
+        raw_y_series = raw_y_series[mask]
         if len(colors) == 0:
             st.warning("All color values ≤ 0, cannot create logarithmic plot")
             return None
@@ -633,6 +774,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         y = y[mask]
         colors = colors[mask]
         sizes = sizes[mask]
+        plot_data = plot_data[mask]
+        raw_size_series = raw_size_series[mask]
+        raw_y_series = raw_y_series[mask]
         if len(sizes) == 0:
             st.warning("All size values ≤ 0, cannot create logarithmic plot")
             return None
@@ -648,10 +792,45 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
     else:
         sizes_scaled = np.ones_like(sizes) * 50
     
-    fig, ax = plt.subplots(figsize=(8, 6))
+    # Determine whether we should build the marginal figure layout
+    build_marginals = False
+    if show_marginals:
+        has_size_groups = (size_col_name is not None) and (size_col_raw is not None)
+        has_filter_groups = (filter_display_name is not None) and (filter_name is not None) and show_legend
+        build_marginals = has_size_groups or has_filter_groups
+    
+    if build_marginals:
+        n_marginals = 0
+        if (size_col_name is not None) and (size_col_raw is not None):
+            n_marginals += 1
+        if (filter_display_name is not None) and (filter_name is not None) and show_legend:
+            n_marginals += 1
+        # Layout: top = main chart (spans full width), bottom row = marginal plots
+        fig = plt.figure(figsize=(8 + 3 * n_marginals, 9))
+        gs = fig.add_gridspec(2, n_marginals,
+                              height_ratios=[3, 1.2],
+                              hspace=0.35, wspace=0.35)
+        ax = fig.add_subplot(gs[0, :])
+        marginal_axes = []
+        for i in range(n_marginals):
+            marginal_axes.append(fig.add_subplot(gs[1, i]))
+    else:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        marginal_axes = []
     
     import matplotlib.lines as mlines
     from matplotlib.legend_handler import HandlerLine2D
+    
+    # Human-readable legend titles
+    if filter_display_name is not None:
+        filter_title = _humanize_filter_label(filter_display_name) + ':'
+    else:
+        filter_title = 'Category:'
+    
+    if size_col_name is not None:
+        size_title = _humanize_size_label(size_col_name) + ':'
+    else:
+        size_title = 'Size:'
     
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
         # Use different markers for each category
@@ -679,9 +858,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         
         # Prepare size legend entries with FIXED visual sizes
         if size_log:
-            size_label = f'log10({plot_data[size_col].name})'
+            size_label = f'log10({_humanize_size_label(size_col_name)})' if size_col_name is not None else 'log10(size)'
         else:
-            size_label = plot_data[size_col].name
+            size_label = _humanize_size_label(size_col_name) if size_col_name is not None else 'Size'
         
         # Calculate min, median, max values for the legend
         size_min_val = sizes.min() if len(sizes) > 0 else 1
@@ -694,7 +873,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         LEGEND_MEDIUM_SIZE = 60
         LEGEND_LARGE_SIZE = 150
         
-        # Create FIRST LEGEND: Additive categories with FIXED marker size
+        # Create FIRST LEGEND: category with FIXED marker size
         category_handles = []
         category_labels = []
         
@@ -711,7 +890,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
             category_handles.append(handle)
             category_labels.append(cat)
         
-        legend1 = ax.legend(category_handles, category_labels, title='Additive:',
+        legend1 = ax.legend(category_handles, category_labels, title=filter_title,
                            loc='upper left', frameon=True, framealpha=0.5)
         
         ax.add_artist(legend1)
@@ -745,7 +924,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           markeredgecolor='black'))
         size_labels.append(f'Max: {size_max_val:.3f}')
         
-        legend2 = ax.legend(size_handles, size_labels, title='Grain size:',
+        legend2 = ax.legend(size_handles, size_labels, title=size_title,
                            loc='upper right', frameon=True, framealpha=0.5)
         
         ax.add_artist(legend2)
@@ -765,9 +944,9 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
         
         # Add size legend only with FIXED visual sizes
         if size_log:
-            size_label = f'log10({plot_data[size_col].name})'
+            size_label = f'log10({_humanize_size_label(size_col_name)})' if size_col_name is not None else 'log10(size)'
         else:
-            size_label = plot_data[size_col].name
+            size_label = _humanize_size_label(size_col_name) if size_col_name is not None else 'Size'
         
         size_min_val = sizes.min() if len(sizes) > 0 else 1
         size_median_val = np.percentile(sizes, 50) if len(sizes) > 0 else 2
@@ -805,15 +984,83 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col,
                           markeredgecolor='black'))
         size_labels.append(f'Max: {size_max_val:.3f}')
         
-        ax.legend(size_handles, size_labels, title='Grain size:',
+        ax.legend(size_handles, size_labels, title=size_title,
                   loc='upper right', frameon=True, framealpha=0.5)
     
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
     ax.grid(True, alpha=0.3, linestyle='--')
     
+    # ============================================
+    # MARGINAL DISTRIBUTIONS (ggside style)
+    # ============================================
+    if build_marginals and len(marginal_axes) > 0:
+        # Y values used for the marginal distributions (raw, before log transform)
+        y_raw_vals = np.asarray(raw_y_series.values, dtype=float)
+        
+        y_marg_label = ylabel
+        
+        ax_idx = 0
+        
+        # 1) Marginal by size terciles
+        if (size_col_name is not None) and (size_col_raw is not None):
+            size_raw_vals = np.asarray(raw_size_series.values, dtype=float)
+            mask_finite = np.isfinite(size_raw_vals) & np.isfinite(y_raw_vals)
+            size_ok = size_raw_vals[mask_finite]
+            y_ok = y_raw_vals[mask_finite]
+            if len(size_ok) >= 3:
+                q33 = np.percentile(size_ok, 33.333)
+                q66 = np.percentile(size_ok, 66.667)
+                g1_mask = size_ok <= q33
+                g2_mask = (size_ok > q33) & (size_ok <= q66)
+                g3_mask = size_ok > q66
+                groups = []
+                if g1_mask.sum() > 0:
+                    groups.append(('0–33%', y_ok[g1_mask]))
+                if g2_mask.sum() > 0:
+                    groups.append(('33–66%', y_ok[g2_mask]))
+                if g3_mask.sum() > 0:
+                    groups.append(('66–100%', y_ok[g3_mask]))
+                _plot_kde_marginal(
+                    marginal_axes[ax_idx],
+                    groups,
+                    y_marg_label,
+                    normalize_marginals,
+                    f'Y distribution by {_humanize_size_label(size_col_name)} terciles'
+                )
+            else:
+                marginal_axes[ax_idx].text(0.5, 0.5, 'Not enough data',
+                                            ha='center', va='center',
+                                            transform=marginal_axes[ax_idx].transAxes,
+                                            fontsize=9)
+                marginal_axes[ax_idx].set_title(
+                    f'Y distribution by {_humanize_size_label(size_col_name)} terciles',
+                    fontsize=10, fontweight='bold')
+            ax_idx += 1
+        
+        # 2) Marginal by active filter categories
+        if (filter_display_name is not None) and (filter_name is not None) and show_legend:
+            cats = plot_data[filter_name].values
+            mask_finite = pd.notna(cats) & np.isfinite(y_raw_vals)
+            cats_ok = cats[mask_finite]
+            y_ok = y_raw_vals[mask_finite]
+            groups = []
+            for cat in pd.unique(cats_ok):
+                vals = y_ok[cats_ok == cat]
+                if len(vals) > 0:
+                    groups.append((str(cat), vals))
+            _plot_kde_marginal(
+                marginal_axes[ax_idx],
+                groups,
+                y_marg_label,
+                normalize_marginals,
+                f'Y distribution by {_humanize_filter_label(filter_display_name)}'
+            )
+            ax_idx += 1
+    
     plt.tight_layout()
     return fig
+
 # ============================================
 # FUNCTION FOR DOWNLOADING PLOTS
 # ============================================
@@ -1203,14 +1450,15 @@ def main():
                 st.warning("No data available after filtering")
             else:
                 # Determine marker style based on active filters
-                marker_style, show_legend = get_filter_markers(df_plot, st.session_state.active_filters_count)
+                marker_style, show_legend, filter_name_active = get_filter_markers(
+                    df_plot, st.session_state.active_filters_count)
                 
                 if plot_type == 'Scatter with color scale':
                     fig = create_scatter_heatmap(
                         df_plot, x_axis, y_axis, z_col,
                         log_x, log_y, log_z, palette,
                         '', x_axis, y_axis, z_label,
-                        marker_style, show_legend, st.session_state.active_filter_name
+                        marker_style, show_legend, filter_name_active
                     )
                 elif plot_type == 'Contour plot':
                     fig = create_contour_heatmap(
@@ -1343,6 +1591,22 @@ def main():
         with col4:
             log_size_bubble = st.checkbox("log10(Size)", value=False, key="bubble_log_size")
         
+        # Marginal distributions controls
+        col1, col2 = st.columns(2)
+        with col1:
+            show_marginals = st.checkbox(
+                "Show marginal distributions (ggside)",
+                value=False,
+                key="bubble_show_marginals"
+            )
+        with col2:
+            normalize_marginals = st.checkbox(
+                "Normalize marginals (per group)",
+                value=False,
+                key="bubble_normalize_marginals",
+                disabled=not show_marginals
+            )
+        
         if st.button("Generate Bubble Chart", key="bubble_btn"):
             if len(df_plot_bubble) == 0:
                 st.warning("No data available after filtering")
@@ -1362,14 +1626,32 @@ def main():
                     size_col_bubble = size_axis
                 
                 # Determine marker style based on active filters
-                marker_style, show_legend = get_filter_markers(df_plot_bubble, st.session_state.active_filters_count)
+                marker_style, show_legend, filter_name_active = get_filter_markers(
+                    df_plot_bubble, st.session_state.active_filters_count)
+                
+                # Determine whether to pass size info for marginals
+                size_col_name_for_marg = None
+                size_col_raw_for_marg = None
+                if size_axis != 'None':
+                    size_col_name_for_marg = size_axis
+                    size_col_raw_for_marg = size_axis
+                
+                filter_display_name_for_marg = None
+                if show_legend and filter_name_active is not None:
+                    filter_display_name_for_marg = filter_name_active
                 
                 fig = create_bubble_chart(
                     df_plot_bubble, x_axis_bubble, y_axis_bubble, 
                     color_col_bubble, size_col_bubble,
                     log_x_bubble, log_y_bubble, log_color_bubble, log_size_bubble,
                     palette_bubble, '', x_axis_bubble, y_label,
-                    marker_style, show_legend, st.session_state.active_filter_name
+                    marker_style, show_legend, filter_name_active,
+                    size_col_name=size_col_name_for_marg,
+                    filter_display_name=filter_display_name_for_marg,
+                    show_marginals=show_marginals,
+                    normalize_marginals=normalize_marginals,
+                    size_col_raw=size_col_raw_for_marg,
+                    y_col_raw=y_axis_bubble
                 )
                 
                 if fig is not None:
