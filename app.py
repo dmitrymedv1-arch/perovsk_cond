@@ -435,15 +435,15 @@ def _plot_kde_marginal(ax, groups, ylabel, normalize, title):
             continue
         if normalize:
             # Normalize density to integrate to 1 over y_grid
-            area = np.trapezoid(dens, y_grid)
-            if area > 0:
-                dens = dens / area
+            peak = np.max(dens) if len(dens) > 0 else 0.0
+            if peak > 0:
+                dens = dens / peak
         color = cmap(i / max(1, n_groups - 1)) if n_groups > 1 else cmap(0.0)
         ax.fill_betweenx(y_grid, 0, dens, color=color, alpha=0.35, label=label)
         ax.plot(dens, y_grid, color=color, linewidth=1.5)
 
     ax.set_title(title, fontsize=10, fontweight='bold')
-    ax.set_xlabel('Density' if not normalize else 'Normalized density',
+    ax.set_xlabel('Density' if not normalize else 'Normalized density (peak = 1)',
                   fontsize=9, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=9, fontweight='bold')
     ax.grid(True, alpha=0.3, linestyle='--')
