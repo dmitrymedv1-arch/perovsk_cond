@@ -1082,6 +1082,255 @@ def plot_meta_forest(df_effects, df_ci, labels, title='Meta-forest by Reference'
     ax.set_xlabel('Effect (mean ΔEa)', fontweight='bold'); ax.set_title(title, fontweight='bold')
     ax.grid(True, alpha=0.3, axis='x'); plt.tight_layout(); return fig
 
+def plot_additive_vs_pure(pairs_df, y_scale='log10', heat_metric='abs_delta_rho',
+                          palette='viridis', clip_range=None, facet_by=None,
+                          temperature_col='σ total, 600', facet_groups=None):
+    """
+    Main plot: x = x, wt%; y = ratio or log10(ratio);
+    marker shape encodes same_Tsin (circle vs square);
+    marker fill encodes heat_metric value (empty if heat_value is NaN or zero);
+    background gradient: green above no-effect line, red below.
+    """
+    if pairs_df is None or len(pairs_df) == 0:
+        return None
+
+    d = pairs_df.dropna(subset=['x_wt', 'ratio']).copy()
+    if y_scale == 'log10':
+        d = d[d['ratio'] > 0].copy()
+        d['y'] = d['log10_ratio']
+        y_label = 'log10(σ_with / σ_without)'
+        no_effect = 0.0
+    else:
+        d['y'] = d['ratio']
+        y_label = 'σ_with / σ_without'
+        no_effect = 1.0
+    if len(d) == 0:
+        return None
+
+    facets = [None]
+    if facet_by and facet_groups:
+        facets = facet_groups if isinstance(facet_groups, list) else [facet_groups]
+
+    n_facets = max(1, len(facets))
+    if n_facets == 1:
+        fig, axes = plt.subplots(figsize=(9, 6))
+        axes_list = [axes]
+    else:
+        fig, axes = plt.subplots(1, n_facets, figsize=(7 * n_facets, 6), squeeze=False)
+        axes_list = axes[0]
+
+    heat_label = {'abs_delta_rho': '|Δρ| (%)',
+                  'abs_delta_d': '|Δd| (µm)',
+                  'd_ratio': 'd_additive / d_pure'}.get(heat_metric, heat_metric)
+
+    heat_valid = d['heat_value'].dropna()
+    has_heat = len(heat_valid) > 0 and heat_valid.max() > heat_valid.min()
+    if has_heat:
+        norm = Normalize(vmin=heat_valid.min(), vmax=heat_valid.max())
+    else:
+        norm = Normalize(vmin=0, vmax=1)
+
+    for ax, facet_val in zip(axes_list, facets):
+        if facet_val is None:
+            sub = d.copy()
+            title = ''
+        else:
+            if facet_by not in d.columns:
+                continue
+            sub = d[d[facet_by] == facet_val].copy()
+            title = f'{facet_by}: {facet_val}'
+
+        if clip_range is not None:
+            x_lo = max(d['x_wt'].min(), 0) * 0.95
+            x_hi = d['x_wt'].max() * 1.05
+            y_lo, y_hi = clip_range
+        else:
+            x_lo = max(d['x_wt'].min(), 0) * 0.95 if d['x_wt'].min() >= 0 else d['x_wt'].min() * 1.05
+            x_hi = d['x_wt'].max() * 1.05
+            y_lo = d['y'].min()
+            y_hi = d['y'].max()
+            pad = max(abs(y_lo - no_effect), abs(y_hi - no_effect)) * 0.15
+            y_lo -= pad; y_hi += pad
+
+        # background gradient
+        n_grad = 200
+        y_grad = np.linspace(y_lo, y_hi, n_grad).reshape(-1, 1)
+        dist = np.abs(y_grad - no_effect)
+        max_dist = max(np.abs(y_hi - no_effect), np.abs(y_lo - no_effect))
+        if max_dist <= 0:
+            max_dist = 1.0
+        alpha = (dist / max_dist) * 0.35
+        sign = np.sign(y_grad - no_effect)
+        bg = np.zeros((n_grad, 1, 4))
+        bg[sign[:, 0] > 0, 0, :] = [0.1, 0.7, 0.1, 0.0]
+        bg[sign[:, 0] < 0, 0, :] = [0.85, 0.15, 0.15, 0.0]
+        bg[:, :, 3] = alpha
+        ax.imshow(bg, extent=[x_lo, x_hi, y_lo, y_hi], aspect='auto',
+                  origin='lower', zorder=0, interpolation='bilinear')
+
+        ax.axhline(no_effect, color='black', linestyle='--', linewidth=1.0, alpha=0.7, zorder=1)
+
+        same_mask = sub['same_Tsin'].astype(bool)
+        for grp_mask, marker, label in [(same_mask, 'o', 'Same T_sin'),
+                                         (~same_mask, 's', 'Different T_sin')]:
+            g = sub[grp_mask]
+            if len(g) == 0: continue
+            filled = g[g['heat_value'].notna() & (g['heat_value'] != 0)]
+            empty = g[g['heat_value'].isna() | (g['heat_value'] == 0)]
+            if len(filled) > 0:
+                ax.scatter(filled['x_wt'], filled['y'],
+                           c=filled['heat_value'], cmap=palette, norm=norm,
+                           marker=marker, s=110, edgecolors='black',
+                           linewidth=0.8, zorder=3, label=label)
+            if len(empty) > 0:
+                ax.scatter(empty['x_wt'], empty['y'],
+                           facecolors='none', edgecolors='black',
+                           marker=marker, s=110, linewidth=1.2, zorder=3,
+                           label=f'{label} (no/zero Δ)')
+
+        ax.set_xlim(x_lo, x_hi)
+        ax.set_ylim(y_lo, y_hi)
+        style_axis(ax, 'Sintering additive concentration, wt%', y_label)
+        if title: ax.set_title(title, fontweight='bold')
+
+    handles, labels = axes_list[0].get_legend_handles_labels()
+    if handles:
+        axes_list[0].legend(handles, labels, loc='upper left', fontsize=8,
+                            frameon=True, framealpha=0.7)
+
+    if has_heat:
+        sm = ScalarMappable(norm=norm, cmap=palette)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=axes_list if n_facets > 1 else axes_list[0],
+                            fraction=0.03, pad=0.02)
+        cbar.set_label(heat_label, fontsize=10, fontweight='bold')
+
+    fig.suptitle(f'Additive vs Pure — temperature: {temperature_col}', fontweight='bold')
+    plt.tight_layout()
+    return fig
+
+def plot_ratio_vs_delta(pairs_df, delta_col='d_rho', y_scale='log10', palette='viridis'):
+    """Scatter of delta (d_rho or d_d) vs ratio (or log10 ratio)."""
+    if pairs_df is None or len(pairs_df) == 0:
+        return None
+    d = pairs_df.dropna(subset=[delta_col, 'ratio']).copy()
+    if y_scale == 'log10':
+        d = d[d['ratio'] > 0].copy()
+        d['y'] = d['log10_ratio']
+        y_label = 'log10(σ_with / σ_without)'
+        no_effect = 0.0
+    else:
+        d['y'] = d['ratio']
+        y_label = 'σ_with / σ_without'
+        no_effect = 1.0
+    if len(d) < 2:
+        return None
+    fig, ax = plt.subplots(figsize=(8, 5))
+    color_by_same = d['same_Tsin'].astype(bool)
+    ax.scatter(d.loc[color_by_same, delta_col], d.loc[color_by_same, 'y'],
+               s=90, marker='o', c='steelblue', edgecolors='black',
+               label='Same T_sin', alpha=0.85)
+    ax.scatter(d.loc[~color_by_same, delta_col], d.loc[~color_by_same, 'y'],
+               s=90, marker='s', c='darkorange', edgecolors='black',
+               label='Different T_sin', alpha=0.85)
+    ax.axhline(no_effect, color='black', linestyle='--', linewidth=1.0, alpha=0.7)
+    try:
+        r_s, p_s = stats.spearmanr(d[delta_col], d['y'])
+        z = np.polyfit(d[delta_col], d['y'], 1)
+        xx = np.linspace(d[delta_col].min(), d[delta_col].max(), 20)
+        ax.plot(xx, np.polyval(z, xx), 'k-', linewidth=1.2, alpha=0.6)
+        ax.set_title(f'Spearman ρ = {r_s:.3f}, p = {p_s:.3g}, n = {len(d)}', fontweight='bold')
+    except Exception:
+        pass
+    x_label = {'d_rho': 'Δρ = ρ_additive − ρ_Pure (%)',
+               'd_d': 'Δd = d_additive − d_Pure (µm)'}.get(delta_col, delta_col)
+    style_axis(ax, x_label, y_label)
+    ax.legend(fontsize=8)
+    plt.tight_layout()
+    return fig
+
+def plot_ratio_boxplot(pairs_df, group_col='Additive', y_scale='log10'):
+    """Box + scatter of ratio (or log10 ratio) grouped by Additive or by same_Tsin."""
+    if pairs_df is None or len(pairs_df) == 0:
+        return None
+    d = pairs_df.dropna(subset=[group_col, 'ratio']).copy()
+    if y_scale == 'log10':
+        d = d[d['ratio'] > 0].copy()
+        d['y'] = d['log10_ratio']
+        y_label = 'log10(σ_with / σ_without)'
+        no_effect = 0.0
+    else:
+        d['y'] = d['ratio']
+        y_label = 'σ_with / σ_without'
+        no_effect = 1.0
+    if len(d) < 2:
+        return None
+    groups = [g['y'].values for _, g in d.groupby(group_col) if len(g) > 0]
+    labels = [str(k) for k, g in d.groupby(group_col) if len(g) > 0]
+    if len(groups) == 0:
+        return None
+    fig, ax = plt.subplots(figsize=(max(6, 1.2 * len(groups)), 5))
+    bp = ax.boxplot(groups, widths=0.5, patch_artist=True, showfliers=False)
+    for box in bp['boxes']:
+        box.set_facecolor('lightblue'); box.set_edgecolor('black')
+    for i, g in enumerate(groups):
+        jitter = np.random.normal(0, 0.05, len(g))
+        ax.scatter(np.ones_like(g) * (i + 1) + jitter, g, s=30, alpha=0.6,
+                   c='steelblue', edgecolors='black', linewidth=0.5)
+    ax.axhline(no_effect, color='black', linestyle='--', linewidth=1.0, alpha=0.7)
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels, rotation=30, ha='right')
+    style_axis(ax, group_col, y_label)
+    plt.tight_layout()
+    return fig
+
+def summarize_pairs(pairs_df, y_scale='log10'):
+    """Return a dict with numeric summary for same/diff Tsin groups + Spearman correlations."""
+    if pairs_df is None or len(pairs_df) == 0:
+        return None
+    d = pairs_df.dropna(subset=['ratio']).copy()
+    if y_scale == 'log10':
+        d = d[d['ratio'] > 0].copy()
+        d['y'] = d['log10_ratio']
+        no_effect = 0.0
+    else:
+        d['y'] = d['ratio']
+        no_effect = 1.0
+    out = {}
+    for grp_name, mask in [('same', d['same_Tsin'].astype(bool)),
+                           ('diff', ~d['same_Tsin'].astype(bool))]:
+        g = d[mask]
+        out[f'n_{grp_name}'] = len(g)
+        if len(g) > 0:
+            out[f'mean_ratio_{grp_name}'] = g['ratio'].mean()
+            out[f'median_ratio_{grp_name}'] = g['ratio'].median()
+            out[f'frac_above_1_{grp_name}'] = (g['ratio'] > 1).mean()
+            try:
+                w, pw = stats.wilcoxon(g['y'] - no_effect)
+                out[f'wilcoxon_p_{grp_name}'] = pw
+            except Exception:
+                out[f'wilcoxon_p_{grp_name}'] = np.nan
+        else:
+            out[f'mean_ratio_{grp_name}'] = np.nan
+            out[f'median_ratio_{grp_name}'] = np.nan
+            out[f'frac_above_1_{grp_name}'] = np.nan
+            out[f'wilcoxon_p_{grp_name}'] = np.nan
+    try:
+        r_rho, p_rho = stats.spearmanr(d['d_rho'].dropna(),
+                                       d.loc[d['d_rho'].notna(), 'y'])
+        out['spearman_rho'] = r_rho
+        out['spearman_rho_p'] = p_rho
+    except Exception:
+        out['spearman_rho'] = np.nan; out['spearman_rho_p'] = np.nan
+    try:
+        r_d, p_d = stats.spearmanr(d['d_d'].dropna(),
+                                   d.loc[d['d_d'].notna(), 'y'])
+        out['spearman_d'] = r_d
+        out['spearman_d_p'] = p_d
+    except Exception:
+        out['spearman_d'] = np.nan; out['spearman_d_p'] = np.nan
+    return out
+
 def plot_bootstrap_coefs(coefs_samples, coef_names):
     fig, ax = plt.subplots(figsize=(8, max(3, 0.4*len(coef_names))))
     for i, (name, vals) in enumerate(zip(coef_names, coefs_samples.T)):
@@ -1692,6 +1941,104 @@ def run_cem_matching(df, ref_col, match_on=('ρ, %', 'T sin'), n_bins=5):
             rows.append({'Reference': ref, 'Additive': a.get('Sintering additive'),
                          'ref_idx': match_idx, 'add_idx': a.name, 'match_dist': 0.0, 'bin': b})
     return pd.DataFrame(rows) if rows else None
+
+def build_pairs_within_reference(df, temperature_col, heat_metric='delta_rho'):
+    """
+    Build (additive, Pure) pairs within each Reference.
+    - For each Reference, pick ONE Pure sample:
+      * if only one Pure -> use it
+      * if several Pure -> pick the one with the LOWEST sigma at temperature_col
+        (among those with valid sigma > 0 at this temperature)
+    - If no Pure with valid sigma -> skip the whole Reference
+    - For each additive sample in the same Reference with valid sigma > 0 and non-null x, wt%:
+      * compute ratio = sigma_additive / sigma_pure
+      * compute d_rho, d_d, d_ratio, same_Tsin
+    Returns a pandas DataFrame with one row per valid pair.
+    """
+    if temperature_col not in df.columns:
+        return None
+    if 'Sintering additive' not in df.columns or 'References' not in df.columns:
+        return None
+    if 'x, wt%' not in df.columns:
+        return None
+
+    rows = []
+    for ref, g in df.groupby('References'):
+        pure_mask = g['Sintering additive'] == 'Pure'
+        pure_g = g[pure_mask]
+        if len(pure_g) == 0:
+            continue
+        pure_valid = pure_g[pure_g[temperature_col].notna() & (pure_g[temperature_col] > 0)]
+        if len(pure_valid) == 0:
+            continue
+        # choose Pure with LOWEST sigma at temperature_col
+        best_pure = pure_valid.sort_values(temperature_col, ascending=True).iloc[0]
+        sigma_pure = best_pure[temperature_col]
+        if pd.isna(sigma_pure) or sigma_pure <= 0:
+            continue
+        rho_pure = best_pure.get('ρ, %', np.nan) if 'ρ, %' in g.columns else np.nan
+        d_pure = best_pure.get('d, mkm', np.nan) if 'd, mkm' in g.columns else np.nan
+        tsin_pure = best_pure.get('T sin', np.nan) if 'T sin' in g.columns else np.nan
+
+        additive_g = g[~pure_mask]
+        for _, a in additive_g.iterrows():
+            sigma_a = a.get(temperature_col, np.nan)
+            x_wt = a.get('x, wt%', np.nan)
+            if pd.isna(sigma_a) or sigma_a <= 0:
+                continue
+            if pd.isna(x_wt):
+                continue
+            ratio = sigma_a / sigma_pure
+            if not np.isfinite(ratio) or ratio <= 0:
+                continue
+            log10_ratio = np.log10(ratio)
+
+            rho_a = a.get('ρ, %', np.nan) if 'ρ, %' in g.columns else np.nan
+            d_a = a.get('d, mkm', np.nan) if 'd, mkm' in g.columns else np.nan
+            tsin_a = a.get('T sin', np.nan) if 'T sin' in g.columns else np.nan
+
+            d_rho = (rho_a - rho_pure) if pd.notna(rho_a) and pd.notna(rho_pure) else np.nan
+            d_d = (d_a - d_pure) if pd.notna(d_a) and pd.notna(d_pure) else np.nan
+            d_ratio = (d_a / d_pure) if pd.notna(d_a) and pd.notna(d_pure) and d_pure > 0 else np.nan
+
+            same_tsin = False
+            if pd.notna(tsin_a) and pd.notna(tsin_pure):
+                same_tsin = abs(float(tsin_a) - float(tsin_pure)) <= 1.0
+
+            if heat_metric == 'abs_delta_rho':
+                heat_val = abs(d_rho) if pd.notna(d_rho) else np.nan
+            elif heat_metric == 'abs_delta_d':
+                heat_val = abs(d_d) if pd.notna(d_d) else np.nan
+            elif heat_metric == 'd_ratio':
+                heat_val = d_ratio if pd.notna(d_ratio) else np.nan
+            else:
+                heat_val = abs(d_rho) if pd.notna(d_rho) else np.nan
+
+            rows.append({
+                'Reference': ref,
+                'Additive': a.get('Sintering additive'),
+                'x_wt': float(x_wt),
+                'sigma_with': float(sigma_a),
+                'sigma_without': float(sigma_pure),
+                'ratio': float(ratio),
+                'log10_ratio': float(log10_ratio),
+                'rho_additive': rho_a,
+                'rho_pure': rho_pure,
+                'd_rho': d_rho,
+                'd_additive': d_a,
+                'd_pure': d_pure,
+                'd_d': d_d,
+                'd_ratio': d_ratio,
+                'Tsin_additive': tsin_a,
+                'Tsin_pure': tsin_pure,
+                'same_Tsin': bool(same_tsin),
+                'heat_value': heat_val,
+                'temperature_col': temperature_col,
+            })
+
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
 
 def run_meta_forest(df, ref_col, y_col='σ total, 600', treatment_group='Pure'):
     """Per-reference effect of each additive vs Pure (mean diff + CI)."""
@@ -2347,224 +2694,141 @@ def main():
                                 file_name="curve_features.tsv", mime="text/tab-separated-values")
 
     with tabs[8]:
-        st.header("🎯 Additive vs Pure — Conditional Effect Analysis")
-        if 'Sintering additive' not in df_f.columns or 'References' not in df_f.columns:
-            st.warning("Need 'Sintering additive' and 'References' columns")
+        st.header("🎯 Additive vs Pure — ratio-based analysis")
+        if 'Sintering additive' not in df_f.columns or 'References' not in df_f.columns or 'x, wt%' not in df_f.columns:
+            st.warning("Need 'Sintering additive', 'References', and 'x, wt%' columns")
         else:
-            _transport_opts = [c for c in TEMP_COLS if c in df_f.columns] + ['Ea_final']
-            _default_transport = 'σ total, 600' if 'σ total, 600' in df_f.columns else ('Ea_final' if 'Ea_final' in df_f.columns else _transport_opts[0])
-            y_transport = st.selectbox(
-                "Transport metric for comparison",
-                options=_transport_opts,
-                index=_transport_opts.index(_default_transport) if _default_transport in _transport_opts else 0,
-                key='ap_transport_metric',
-                help="Primary outcome for matched-pairs, mediation, interaction and verdict. "
-                     "σ at a working temperature is recommended; Ea is shown as a secondary (mechanism) outcome."
-            )
-            _is_sigma = y_transport in TEMP_COLS
-            if _is_sigma:
-                y_transport_label = y_transport.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
-                y_transport_log = st.checkbox("Use log10(σ) for paired/mediation analysis",
-                                              value=True, key='ap_transport_log',
-                                              help="Conductivity spans orders of magnitude — log10 is statistically appropriate.")
-            else:
-                y_transport_label = 'Ea (eV)'
-                y_transport_log = False
-            st.caption(f"Primary outcome: **{y_transport_label}**"
-                       + (f"  |  log10 transform: **{'on' if y_transport_log else 'off'}**" if _is_sigma else "")
-                       + "  |  Secondary outcome (mechanism): **Ea_final**")
-            st.subheader("1) Matched pairs within Reference")
-            match_on = st.multiselect("Match on", ['ρ, %', 'T sin'], default=['ρ, %'], key='ap_match')
-            method = st.selectbox("Matching method", ['Nearest neighbor', 'CEM (canonical, quantile bins)'], key='ap_method')
-            n_bins_cem = 5
-            if method.startswith('CEM'):
-                n_bins_cem = st.slider("CEM quantile bins", 2, 10, 5, key='ap_cembins')
-            if st.button("Build matched pairs", key='ap_btn1'):
-                if method.startswith('CEM'):
-                    pairs = run_cem_matching(df_f, 'References', match_on=match_on, n_bins=n_bins_cem)
+            _temp_opts = [c for c in TEMP_COLS if c in df_f.columns]
+            _default_temp = 'σ total, 600' if 'σ total, 600' in df_f.columns else (_temp_opts[0] if _temp_opts else None)
+            c1, c2, c3 = st.columns(3)
+            temp_col = c1.selectbox("Temperature for σ", _temp_opts,
+                                     index=_temp_opts.index(_default_temp) if _default_temp in _temp_opts else 0,
+                                     key='ap_temp')
+            y_scale = c2.selectbox("Y-scale", ['log10', 'ratio'], index=0, key='ap_yscale')
+            heat_metric = c3.selectbox("Heat scale metric",
+                                        ['abs_delta_rho', 'abs_delta_d', 'd_ratio'],
+                                        format_func=lambda x: {'abs_delta_rho': '|Δρ|',
+                                                                'abs_delta_d': '|Δd|',
+                                                                'd_ratio': 'd_additive/d_Pure'}[x],
+                                        index=0, key='ap_heat')
+            c1, c2, c3 = st.columns(3)
+            pal_ap = c1.selectbox("Palette", list(COLOR_PALETTES.keys()), key='ap_pal')
+            additive_filter = c2.multiselect("Filter additives", sorted([a for a in df_f['Sintering additive'].dropna().unique() if a != 'Pure']),
+                                              default=[], key='ap_addfilter',
+                                              help="Leave empty to show all")
+            facet_by = c3.selectbox("Facet by", ['None', 'Atmospheres', 'Humidity', 'Structure', 'Method'],
+                                     key='ap_facet')
+            clip_on = st.checkbox("Clip Y axis (limit visible range)", value=False, key='ap_clip')
+            if clip_on:
+                if y_scale == 'log10':
+                    lo, hi = st.slider("Y visible range", -4.0, 4.0, (-2.0, 2.0), 0.1, key='ap_clip_range')
                 else:
-                    pairs = match_pairs_by(df_f, 'References', match_on=match_on)
-                if pairs is not None and len(pairs) > 0:
-                    st.success(f"Found {len(pairs)} matched pairs")
-                    pairs_ext = []
-                    for _, pr in pairs.iterrows():
-                        try:
-                            a = df_f.loc[pr['add_idx']]; p = df_f.loc[pr['ref_idx']]
-                            y_a = a.get(y_transport, np.nan); y_p = p.get(y_transport, np.nan)
-                            if _is_sigma and y_transport_log:
-                                y_a_t = np.log10(y_a) if pd.notna(y_a) and y_a > 0 else np.nan
-                                y_p_t = np.log10(y_p) if pd.notna(y_p) and y_p > 0 else np.nan
-                            else:
-                                y_a_t, y_p_t = y_a, y_p
-                            pairs_ext.append({
-                                'Reference': pr['Reference'], 'Additive': pr['Additive'],
-                                'Y_additive': y_a, 'Y_pure': y_p,
-                                'ΔY_raw': (y_a - y_p) if pd.notna(y_a) and pd.notna(y_p) else np.nan,
-                                'ΔY_transformed': (y_a_t - y_p_t) if pd.notna(y_a_t) and pd.notna(y_p_t) else np.nan,
-                                'Ea_additive': a.get('Ea_final', np.nan), 'Ea_pure': p.get('Ea_final', np.nan),
-                                'ΔEa': a.get('Ea_final', np.nan) - p.get('Ea_final', np.nan),
-                                'ρ_additive': a.get('ρ, %', np.nan), 'ρ_pure': p.get('ρ, %', np.nan),
-                                'Δρ': a.get('ρ, %', np.nan) - p.get('ρ, %', np.nan),
-                                'Tsin_additive': a.get('T sin', np.nan), 'Tsin_pure': p.get('T sin', np.nan),
-                                'ΔTsin': a.get('T sin', np.nan) - p.get('T sin', np.nan),
-                                'match_dist': pr.get('match_dist', 0.0)
-                            })
-                        except: pass
-                    pairs_df = pd.DataFrame(pairs_ext)
-                    st.dataframe(pairs_df)
-                    st.download_button("📥 Download (TSV)", pairs_df.to_csv(sep='\t', index=False),
-                                        file_name="matched_pairs.tsv", mime="text/tab-separated-values")
-                    st.session_state['pairs_df'] = pairs_df
-                else: st.warning("No matched pairs")
-            if 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0:
-                pairs_df = st.session_state['pairs_df']
-                st.markdown(f"**Paired Δ test — primary outcome: {y_transport_label}**")
+                    lo, hi = st.slider("Y visible range", 0.01, 200.0, (0.01, 100.0), key='ap_clip_range')
+                clip_range = (lo, hi)
+            else:
+                clip_range = None
+
+            # rebuild pairs when any control that affects pairing changes
+            _pair_key = (temp_col, heat_metric, tuple(sorted(additive_filter)))
+            if st.session_state.get('ap_pairs_key') != _pair_key or 'ap_pairs_df' not in st.session_state:
+                pairs_df = build_pairs_within_reference(df_f, temperature_col=temp_col, heat_metric=heat_metric)
+                if pairs_df is not None and len(additive_filter) > 0:
+                    pairs_df = pairs_df[pairs_df['Additive'].isin(additive_filter)].copy()
+                st.session_state['ap_pairs_df'] = pairs_df
+                st.session_state['ap_pairs_key'] = _pair_key
+            else:
+                pairs_df = st.session_state['ap_pairs_df']
+
+            if pairs_df is None or len(pairs_df) == 0:
+                st.warning("No valid pairs found. Check that Pure and additive samples have valid σ at chosen temperature.")
+            else:
+                st.success(f"✅ {len(pairs_df)} pairs from {pairs_df['Reference'].nunique()} references "
+                           f"({pairs_df['Additive'].nunique()} additives)")
+                st.caption(f"Pure selection rule: for each reference, the Pure sample with the LOWEST σ at {temp_col} is used as baseline.")
+
+                # main plot
+                st.subheader("σ_with / σ_without vs additive concentration")
+                facet_groups = None
+                if facet_by != 'None' and facet_by in pairs_df.columns:
+                    facet_groups = sorted(pairs_df[facet_by].dropna().unique())
                 try:
-                    col_name = 'ΔY_transformed' if (_is_sigma and y_transport_log) else 'ΔY_raw'
-                    d_paired = pairs_df[col_name].dropna()
-                    if len(d_paired) >= 3:
-                        t, p = stats.wilcoxon(d_paired)
-                        st.success(f"Wilcoxon (paired): W = {t:.3f}, p = {p:.3g}, n = {len(d_paired)}")
-                        st.info(f"Mean Δ = {d_paired.mean():.4f}, median = {d_paired.median():.4f}"
-                                + (f" (in log10 units)" if _is_sigma and y_transport_log else ""))
-                        if _is_sigma and y_transport_log:
-                            st.caption(f"Mean fold-change = {10**d_paired.mean():.3f}× "
-                                       f"(additive vs Pure at matched density/Tsin)")
-                    else:
-                        st.warning("Not enough valid pairs for primary outcome")
+                    fig = plot_additive_vs_pure(pairs_df, y_scale=y_scale, heat_metric=heat_metric,
+                                                 palette=COLOR_PALETTES[pal_ap], clip_range=clip_range,
+                                                 facet_by=(facet_by if facet_by != 'None' else None),
+                                                 facet_groups=facet_groups,
+                                                 temperature_col=temp_col)
+                    if fig is not None:
+                        st.pyplot(fig)
+                        buf = download_plot(fig, "additive_vs_pure.png")
+                        st.download_button("📥 Download plot (PNG)", data=buf,
+                                            file_name="additive_vs_pure.png", mime="image/png",
+                                            key='ap_dl_plot')
+                        plt.close(fig)
                 except Exception as e:
-                    st.warning(f"Paired test (primary) failed: {e}")
-                st.markdown("**Paired ΔEa test (secondary, mechanism)**")
-                try:
-                    t, p = stats.wilcoxon(pairs_df['ΔEa'].dropna())
-                    st.success(f"Wilcoxon (paired): W = {t:.3f}, p = {p:.3g}, n = {pairs_df['ΔEa'].notna().sum()}")
-                    st.info(f"Mean ΔEa = {pairs_df['ΔEa'].mean():.4f} eV, median = {pairs_df['ΔEa'].median():.4f} eV")
-                except: st.warning("Paired ΔEa test failed")
-            st.markdown("---"); st.subheader("2) Density-matched vs Unmatched")
-            if 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0:
-                pdf = st.session_state['pairs_df']
-                matched = pdf[pdf['match_dist'] < pdf['match_dist'].median()]
-                unmatched = pdf[pdf['match_dist'] >= pdf['match_dist'].median()]
-                _delta_col = 'ΔY_transformed' if (_is_sigma and y_transport_log) else 'ΔY_raw'
-                c1, c2 = st.columns(2)
-                c1.metric(f"Density-matched Δ ({y_transport_label})",
-                          f"{matched[_delta_col].mean():.4f}" if len(matched) else "n/a")
-                c2.metric(f"Unmatched Δ ({y_transport_label})",
-                          f"{unmatched[_delta_col].mean():.4f}" if len(unmatched) else "n/a")
-                if len(matched) > 2 and len(unmatched) > 2:
-                    try:
-                        _, pu = stats.mannwhitneyu(matched[_delta_col].dropna(),
-                                                   unmatched[_delta_col].dropna(), alternative='two-sided')
-                        st.success(f"Difference between matched/unmatched: p = {pu:.3g}")
-                    except: pass
-                if 'ΔEa' in pdf.columns:
-                    st.markdown("**Same split, but for ΔEa (secondary outcome):**")
+                    st.error(f"Plot failed: {e}")
+
+                # numeric summary
+                st.subheader("Numeric summary")
+                summary = summarize_pairs(pairs_df, y_scale=y_scale)
+                if summary:
                     c1, c2 = st.columns(2)
-                    c1.metric("Density-matched ΔEa", f"{matched['ΔEa'].mean():.4f}" if len(matched) else "n/a")
-                    c2.metric("Unmatched ΔEa", f"{unmatched['ΔEa'].mean():.4f}" if len(unmatched) else "n/a")
-            st.markdown("---"); st.subheader("3) Mediation analysis")
-            if 'is_additive' in df_f.columns and 'ρ, %' in df_f.columns:
-                try:
-                    _med_df = df_f[['is_additive', 'ρ, %', y_transport]].dropna().copy()
-                    _outcome_for_mediation = y_transport
-                    if _is_sigma and y_transport_log:
-                        _med_df = _med_df[_med_df[y_transport] > 0].copy()
-                        _med_df['_logY'] = np.log10(_med_df[y_transport])
-                        _outcome_for_mediation = '_logY'
-                    res = run_mediation(_med_df, 'is_additive', 'ρ, %', _outcome_for_mediation)
-                    if res:
-                        st.caption(f"Outcome: **{y_transport_label}**"
-                                   + (" (log10)" if _is_sigma and y_transport_log else "")
-                                   + "  |  Mediator: **Density (%)**  |  Treatment: **is_additive**")
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("Total effect", f"{res['total']:.4f}")
-                        c2.metric("Direct effect", f"{res['direct']:.4f}")
-                        c3.metric("Indirect (via density)", f"{res['indirect']:.4f}")
-                        st.markdown(f"a-path = {res['a_path']:.4f}, b-path = {res['b_path']:.4f}")
-                        st.markdown(f"p(total) = {res['p_total']:.3g}, p(direct) = {res['p_direct']:.3g}, n = {res['n']}")
-                        if _is_sigma and y_transport_log:
-                            st.caption(f"In log10 units — indirect effect corresponds to ×{10**res['indirect']:.3f} "
-                                       f"fold-change in σ from density gain alone.")
-                        try:
-                            fig = plot_meditation_diagram(res['total'], res['direct'], res['indirect'],
-                                                          res['a_path'], res['b_path'], res['p_total'], res['p_direct'])
-                            if fig: st.pyplot(fig); plt.close(fig)
-                        except: pass
-                    else: st.warning("Need n >= 15")
-                except Exception as e: st.error(f"Error: {e}")
-            st.markdown("---"); st.subheader("4) Interaction: additive × density")
-            if 'is_additive' in df_f.columns and 'ρ, %' in df_f.columns:
-                try:
-                    _int_df = df_f[['is_additive', 'ρ, %', y_transport, 'T sin']].dropna().copy()
-                    if _is_sigma and y_transport_log:
-                        _int_df = _int_df[_int_df[y_transport] > 0].copy()
-                        _int_df['_outcome'] = np.log10(_int_df[y_transport])
-                    else:
-                        _int_df['_outcome'] = _int_df[y_transport]
-                    dint = _int_df
-                    if len(dint) >= 20:
-                        dint = dint.copy()
-                        dint['rho_c'] = dint['ρ, %'] - dint['ρ, %'].mean()
-                        dint['tsin_c'] = dint['T sin'] - dint['T sin'].mean()
-                        dint['inter'] = dint['is_additive'] * dint['rho_c']
-                        X = dint[['is_additive', 'rho_c', 'tsin_c', 'inter']].values
-                        y = dint['_outcome'].values
-                        Xd = np.column_stack([np.ones(len(X)), X])
-                        coef, _, _, _ = np.linalg.lstsq(Xd, y, rcond=None)
-                        resid = y - Xd @ coef; dof = len(y) - Xd.shape[1]
-                        sse = np.sum(resid**2)
-                        cov = sse / dof * np.linalg.inv(Xd.T @ Xd)
-                        se = np.sqrt(np.diag(cov))
-                        t_stat = coef[4] / se[4] if se[4] > 0 else 0
-                        p_int = 2 * (1 - stats.t.cdf(abs(t_stat), dof))
-                        st.caption(f"Outcome: **{y_transport_label}**"
-                                   + (" (log10)" if _is_sigma and y_transport_log else ""))
-                        st.markdown(f"**Interaction β (additive × density):** {coef[4]:.4f}, SE = {se[4]:.4f}, p = {p_int:.3g}")
-                        st.markdown(f"**Main effect (additive):** {coef[1]:.4f}, p = {2*(1-stats.t.cdf(abs(coef[1]/se[1]), dof)):.3g}")
-                        st.markdown(f"**Main effect (density):** {coef[2]:.4f}, p = {2*(1-stats.t.cdf(abs(coef[2]/se[2]), dof)):.3g}")
-                        fig, ax = plt.subplots(figsize=(8, 5))
-                        for grp, color, label in [(0, 'steelblue', 'Pure'), (1, 'darkorange', 'With additive')]:
-                            sub = dint[dint['is_additive'] == grp]
-                            if len(sub) > 0:
-                                ax.scatter(sub['ρ, %'], sub['_outcome'], color=color, alpha=0.6, s=40,
-                                           edgecolors='black', label=label)
-                                try:
-                                    z = np.polyfit(sub['ρ, %'], sub['_outcome'], 1)
-                                    xx = np.linspace(sub['ρ, %'].min(), sub['ρ, %'].max(), 20)
-                                    ax.plot(xx, np.polyval(z, xx), color=color, lw=2)
-                                except: pass
-                        style_axis(ax, 'Density (%)', ('log10(' if _is_sigma and y_transport_log else '') + y_transport_label + (')' if _is_sigma and y_transport_log else ''))
-                        ax.legend()
-                        st.pyplot(fig); plt.close(fig)
-                    else: st.warning("Need n >= 20")
-                except Exception as e: st.error(f"Error: {e}")
-            st.markdown("---"); st.subheader("5) Verdict")
-            try:
-                has_pairs = 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0
-                lines = []
-                if has_pairs:
-                    p = st.session_state['pairs_df']
-                    _delta_col = 'ΔY_transformed' if (_is_sigma and y_transport_log) else 'ΔY_raw'
-                    matched = p[p['match_dist'] < p['match_dist'].median()]
-                    unmatched = p[p['match_dist'] >= p['match_dist'].median()]
-                    if len(matched) > 0:
-                        lines.append(f"• Density-matched pairs ({y_transport_label}): mean Δ = {matched[_delta_col].mean():.4f} (n={len(matched)})")
-                    if len(unmatched) > 0:
-                        lines.append(f"• Unmatched pairs ({y_transport_label}): mean Δ = {unmatched[_delta_col].mean():.4f} (n={len(unmatched)})")
-                    if len(matched) > 0 and len(unmatched) > 0:
-                        m_m, u_m = matched[_delta_col].mean(), unmatched[_delta_col].mean()
-                        if m_m > 0 and u_m < 0:
-                            lines.append("→ Supports 'conditional / compromise' interpretation: additive beneficial only via density gain")
-                        elif m_m < 0 and u_m < 0:
-                            lines.append("→ Additive uniformly harmful (direct effect dominates)")
-                        elif m_m > 0 and u_m > 0:
-                            lines.append("→ Additive uniformly beneficial (direct effect dominates)")
-                    if 'ΔEa' in p.columns and p['ΔEa'].notna().any():
-                        lines.append(f"• Secondary (Ea): matched ΔEa = {matched['ΔEa'].mean():.4f} eV; unmatched ΔEa = {unmatched['ΔEa'].mean():.4f} eV")
-                if lines:
-                    for ln in lines: st.markdown(ln)
-                else: st.info("Run matched pairs analysis to generate a verdict")
-            except Exception as e: st.error(f"Error: {e}")
+                    with c1:
+                        st.markdown("**Same T_sin (additive and Pure sintered at same temperature)**")
+                        st.markdown(f"- n pairs: **{summary['n_same']}**")
+                        if summary['n_same'] > 0:
+                            st.markdown(f"- mean ratio: **{summary['mean_ratio_same']:.3f}**")
+                            st.markdown(f"- median ratio: **{summary['median_ratio_same']:.3f}**")
+                            st.markdown(f"- fraction with ratio > 1: **{summary['frac_above_1_same']*100:.1f}%**")
+                            st.markdown(f"- Wilcoxon (y vs no-effect) p = **{summary['wilcoxon_p_same']:.3g}**")
+                    with c2:
+                        st.markdown("**Different T_sin**")
+                        st.markdown(f"- n pairs: **{summary['n_diff']}**")
+                        if summary['n_diff'] > 0:
+                            st.markdown(f"- mean ratio: **{summary['mean_ratio_diff']:.3f}**")
+                            st.markdown(f"- median ratio: **{summary['median_ratio_diff']:.3f}**")
+                            st.markdown(f"- fraction with ratio > 1: **{summary['frac_above_1_diff']*100:.1f}%**")
+                            st.markdown(f"- Wilcoxon (y vs no-effect) p = **{summary['wilcoxon_p_diff']:.3g}**")
+                    st.markdown("**Spearman correlations (all pairs)**")
+                    st.markdown(f"- |Δρ| ↔ ratio: ρ = **{summary['spearman_rho']:.3f}**, p = **{summary['spearman_rho_p']:.3g}**")
+                    st.markdown(f"- |Δd| ↔ ratio: ρ = **{summary['spearman_d']:.3f}**, p = **{summary['spearman_d_p']:.3g}**")
+
+                # pair table
+                st.subheader("Pair table")
+                st.dataframe(pairs_df)
+                st.download_button("📥 Download pairs (TSV)", pairs_df.to_csv(sep='\t', index=False),
+                                    file_name="additive_vs_pure_pairs.tsv",
+                                    mime="text/tab-separated-values", key='ap_dl_pairs')
+
+                # additional plots
+                st.subheader("Additional diagnostics")
+                c1, c2 = st.columns(2)
+                if c1.button("Δρ vs ratio", key='ap_plot_drho'):
+                    try:
+                        fig = plot_ratio_vs_delta(pairs_df, delta_col='d_rho', y_scale=y_scale)
+                        if fig is not None:
+                            st.pyplot(fig); plt.close(fig)
+                    except Exception as e: st.error(f"Failed: {e}")
+                if c2.button("Δd vs ratio", key='ap_plot_dd'):
+                    try:
+                        fig = plot_ratio_vs_delta(pairs_df, delta_col='d_d', y_scale=y_scale)
+                        if fig is not None:
+                            st.pyplot(fig); plt.close(fig)
+                    except Exception as e: st.error(f"Failed: {e}")
+                c1, c2 = st.columns(2)
+                if c1.button("Box by additive", key='ap_plot_boxa'):
+                    try:
+                        fig = plot_ratio_boxplot(pairs_df, group_col='Additive', y_scale=y_scale)
+                        if fig is not None:
+                            st.pyplot(fig); plt.close(fig)
+                    except Exception as e: st.error(f"Failed: {e}")
+                if c2.button("Box by same/different T_sin", key='ap_plot_boxt'):
+                    try:
+                        _tmp = pairs_df.copy()
+                        _tmp['Tsin_group'] = _tmp['same_Tsin'].map({True: 'Same Tsin', False: 'Different Tsin'})
+                        fig = plot_ratio_boxplot(_tmp, group_col='Tsin_group', y_scale=y_scale)
+                        if fig is not None:
+                            st.pyplot(fig); plt.close(fig)
+                    except Exception as e: st.error(f"Failed: {e}")
 
     with tabs[9]:
         st.header("📋 Data & Export")
