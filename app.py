@@ -1,1698 +1,2496 @@
 # ============================================
-# app.py - Полный код Streamlit приложения
+# app.py - Ceramic Conductivity Data Explorer v4 (FULL)
 # ============================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize, LogNorm
+import matplotlib.patches as mpatches
+from matplotlib.patches import FancyArrowPatch, Rectangle, FancyBboxPatch
+from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
-import io
-import warnings
-from scipy.optimize import curve_fit
-from scipy.interpolate import griddata
-from scipy.stats import gaussian_kde
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib import cm
+import matplotlib.lines as mlines
+import io, warnings, hashlib, itertools
+from collections import Counter
+from scipy import stats, interpolate, optimize, spatial
+from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
+from scipy.spatial import ConvexHull
 import matplotlib
 matplotlib.use('Agg')
-
 warnings.filterwarnings('ignore')
 
+try:
+    from sklearn.preprocessing import StandardScaler, OneHotEncoder
+    from sklearn.decomposition import PCA
+    from sklearn.linear_model import ElasticNetCV, Ridge, LinearRegression
+    from sklearn.cross_decomposition import PLSRegression, CCA
+    from sklearn.cluster import KMeans, AgglomerativeClustering
+    from sklearn.inspection import permutation_importance, partial_dependence
+    from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+    from sklearn.manifold import TSNE
+    from sklearn.feature_selection import mutual_info_regression
+    SKLEARN_OK = True
+except ImportError:
+    SKLEARN_OK = False
+
+try:
+    import statsmodels.api as sm
+    import statsmodels.formula.api as smf
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    STATSMODELS_OK = True
+except ImportError:
+    STATSMODELS_OK = False
+
+try:
+    import shap
+    SHAP_OK = True
+except ImportError:
+    SHAP_OK = False
+
+try:
+    from umap import UMAP
+    UMAP_OK = True
+except ImportError:
+    UMAP_OK = False
+
+try:
+    import prince
+    PRINCE_OK = True
+except ImportError:
+    PRINCE_OK = False
+
+try:
+    from pygam import LinearGAM, s as gam_s
+    PYGAM_OK = True
+except ImportError:
+    PYGAM_OK = False
+
+try:
+    from SALib.sample import saltelli as sobol_saltelli
+    from SALib.analyze import sobol as sobol_analyze
+    SALIB_OK = True
+except ImportError:
+    SALIB_OK = False
+
+try:
+    from skfda.preprocessing.dim_reduction import FPCA as skfda_FPCA
+    from skfda.representation import FDataGrid
+    SKFDA_OK = True
+except ImportError:
+    SKFDA_OK = False
+
+try:
+    import pwlf
+    PWLE_OK = True
+except ImportError:
+    PWLE_OK = False
+
+try:
+    import dcor
+    DCOR_OK = True
+except ImportError:
+    DCOR_OK = False
+
+try:
+    import plotly.graph_objects as go
+    PLOTLY_OK = True
+except ImportError:
+    PLOTLY_OK = False
+
 # ============================================
-# CONFIGURATION AND INITIALIZATION
+# CONFIGURATION
 # ============================================
 
 plt.rcParams.update({
-    'font.size': 10,
-    'axes.labelsize': 11,
-    'axes.labelweight': 'bold',
-    'axes.titlesize': 12,
-    'axes.titleweight': 'bold',
-    'axes.edgecolor': 'black',
-    'axes.linewidth': 1.0,
-    'xtick.color': 'black',
-    'ytick.color': 'black',
-    'xtick.labelsize': 10,
-    'ytick.labelsize': 10,
-    'legend.fontsize': 10,
-    'legend.frameon': True,
-    'legend.framealpha': 0.5,
-    'legend.edgecolor': 'black',
-    'figure.dpi': 600,
-    'savefig.dpi': 600,
-    'savefig.bbox': 'tight',
-    'savefig.pad_inches': 0.1
+    'font.size': 10, 'axes.labelsize': 11, 'axes.labelweight': 'bold',
+    'axes.titlesize': 12, 'axes.titleweight': 'bold',
+    'axes.edgecolor': 'black', 'axes.linewidth': 1.0,
+    'xtick.color': 'black', 'ytick.color': 'black',
+    'xtick.labelsize': 10, 'ytick.labelsize': 10,
+    'legend.fontsize': 10, 'legend.frameon': True,
+    'legend.framealpha': 0.5, 'legend.edgecolor': 'black',
+    'figure.dpi': 600, 'savefig.dpi': 600,
+    'savefig.bbox': 'tight', 'savefig.pad_inches': 0.1
 })
 
 COLOR_PALETTES = {
-    'Viridis': 'viridis',
-    'Plasma': 'plasma',
-    'Inferno': 'inferno',
-    'Magma': 'magma',
-    'Cividis': 'cividis',
-    'Turbo': 'turbo',
-    'Jet': 'jet',
-    'Rainbow': 'rainbow',
-    'Spectral': 'Spectral',
+    'Viridis': 'viridis', 'Plasma': 'plasma', 'Inferno': 'inferno',
+    'Magma': 'magma', 'Cividis': 'cividis', 'Turbo': 'turbo',
+    'Jet': 'jet', 'Rainbow': 'rainbow', 'Spectral': 'Spectral',
     'Coolwarm': 'coolwarm'
 }
 
-# Human-readable labels for numeric descriptors (used in legend titles)
 COLUMN_LABELS = {
     'dop_cont': 'Dopant content',
     'x, wt%': 'Sintering additive concentration',
-    'ρ, %': 'Density',
-    'd, mkm': 'Grain size',
+    'ρ, %': 'Density', 'd, mkm': 'Grain size',
     'tolerance_factor': 'Tolerance factor',
     'chi_B_avg': 'Average electronegativity (B-site)',
     'chi_ratio': 'Electronegativity ratio',
-    'molar_mass': 'Molar mass',
-    'porosity': 'Porosity',
+    'molar_mass': 'Molar mass', 'porosity': 'Porosity',
     'grain_boundary_area': 'Grain boundary area',
     'Ea_final': 'Activation energy',
     'Ea_calculated': 'Activation energy (calculated)',
-    'T sin': 'Sintering temperature',
-    'T sin, °C': 'Sintering temperature',
+    'T sin': 'Sintering temperature', 'T sin, °C': 'Sintering temperature',
 }
 
-# Human-readable labels for filter columns (used in legend titles)
 FILTER_LABELS = {
     'Sintering additive': 'Sintering additive',
-    'Atmospheres': 'Atmosphere',
-    'Humidity': 'Humidity',
-    'Structure': 'Structure',
+    'Atmospheres': 'Atmosphere', 'Humidity': 'Humidity',
+    'Structure': 'Structure', 'Method': 'Synthesis method',
 }
 
-# Common marker set used for every active filter (order matters)
-COMMON_MARKERS = ['o', 's', 'D', '*', '^']
+COMMON_MARKERS = ['o', 's', 'D', '*', '^', 'v', '<', '>', 'p', 'P', 'X']
 
-# Marker dictionaries for different filters
 MARKER_MAP = {
-    'Sintering additive': {
-        'Pure': 'o',
-        'Cu': 's',
-        'Ni': 'D',
-        'Zn': '*',
-        'Fe': '^',
-        'Co': 'v',
-        'Mn': '<',
-        'Cr': '>',
-        'Ag': 'p',
-        'Au': 'P',
-        'Pt': 'X'
-    },
-    'Atmospheres': {
-        'Ox': 'o',
-        'Redox': 's',
-        'Inert': '^',
-        'Reducing': 'v',
-        'Air': 'D'
-    },
-    'Humidity': {
-        'wet': 'D',
-        'dry': '*',
-        'humid': 's',
-        'Wet': 'D',
-        'Dry': '*'
-    },
-    'Structure': {
-        'Cubic': 'o',
-        'orthorhombic': 's',
-        'hexagonal': '^',
-        'monoclinic': 'D',
-        'tetragonal': '*',
-        'rhombohedral': 'v'
-    }
+    'Sintering additive': {'Pure': 'o', 'Cu': 's', 'Ni': 'D', 'Zn': '*', 'Fe': '^',
+                            'Co': 'v', 'Mn': '<', 'Cr': '>', 'Ag': 'p', 'Au': 'P', 'Pt': 'X'},
+    'Atmospheres': {'Ox': 'o', 'Redox': 's', 'Inert': '^', 'Reducing': 'v', 'Air': 'D'},
+    'Humidity': {'wet': 'D', 'dry': '*', 'humid': 's', 'Wet': 'D', 'Dry': '*'},
+    'Structure': {'Cubic': 'o', 'orthorhombic': 's', 'hexagonal': '^',
+                  'monoclinic': 'D', 'tetragonal': '*', 'rhombohedral': 'v'},
 }
 
-IONIC_RADII = {
-    'Ba': 1.61,
-    'Zr': 0.72,
-    'Ce': 0.87,
-    'Sn': 0.69,
-    'Y': 0.90,
-    'Gd': 0.94,
-    'Yb': 0.87,
-    'Sm': 0.96,
-    'O': 1.40
-}
+IONIC_RADII = {'Ba': 1.61, 'Zr': 0.72, 'Ce': 0.87, 'Sn': 0.69, 'Y': 0.90,
+               'Gd': 0.94, 'Yb': 0.87, 'Sm': 0.96, 'O': 1.40}
+ELECTRONEGATIVITY = {'Ba': 0.89, 'Zr': 1.33, 'Ce': 1.12, 'Sn': 1.96, 'Y': 1.22,
+                     'Gd': 1.20, 'Yb': 1.10, 'Sm': 1.17, 'O': 3.44}
+MOLAR_MASS = {'Ba': 137.33, 'Zr': 91.22, 'Ce': 140.12, 'Sn': 118.71, 'Y': 88.91,
+              'Gd': 157.25, 'Yb': 173.05, 'Sm': 150.36, 'O': 16.00}
 
-ELECTRONEGATIVITY = {
-    'Ba': 0.89,
-    'Zr': 1.33,
-    'Ce': 1.12,
-    'Sn': 1.96,
-    'Y': 1.22,
-    'Gd': 1.20,
-    'Yb': 1.10,
-    'Sm': 1.17,
-    'O': 3.44
-}
-
-MOLAR_MASS = {
-    'Ba': 137.33,
-    'Zr': 91.22,
-    'Ce': 140.12,
-    'Sn': 118.71,
-    'Y': 88.91,
-    'Gd': 157.25,
-    'Yb': 173.05,
-    'Sm': 150.36,
-    'O': 16.00
-}
+TEMP_COLS = [f'σ total, {t}' for t in [200, 250, 300, 350, 400, 450, 500, 550,
+                                      600, 650, 700, 750, 800, 850, 900]]
+TEMP_VALUES = [200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900]
+NUMERIC_DESCRIPTORS = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm',
+                       'tolerance_factor', 'chi_B_avg', 'chi_ratio',
+                       'molar_mass', 'porosity', 'grain_boundary_area', 'T sin']
+DERIVED_DESCRIPTORS = ['x_B1', 'x_B2', 'x_dop', 'porosity', 'grain_boundary_area']
 
 # ============================================
-# CACHED FUNCTIONS FOR DESCRIPTOR CALCULATION
+# CACHED COMPUTATIONS
 # ============================================
 
 @st.cache_data
 def compute_descriptors_cached(df_hash, df):
-    """
-    Cached version of descriptor calculation.
-    df_hash is used as a cache key - when data changes, hash changes.
-    """
-    desc_df = pd.DataFrame(index=df.index)
-    
+    desc = pd.DataFrame(index=df.index)
     for idx, row in df.iterrows():
-        x_B2 = row['B2_cont'] if pd.notna(row['B2_cont']) else 0.0
-        x_dop = row['dop_cont'] if pd.notna(row['dop_cont']) else 0.0
-        
-        has_B2 = pd.notna(row['B2 cation']) and row['B2 cation'] != ''
-        
-        if has_B2:
-            x_B1 = 1.0 - x_B2 - x_dop
-        else:
-            x_B1 = 1.0 - x_dop
-            x_B2 = 0.0
-        
+        x_B2 = row.get('B2_cont', 0) if pd.notna(row.get('B2_cont', np.nan)) else 0.0
+        x_dop = row.get('dop_cont', 0) if pd.notna(row.get('dop_cont', np.nan)) else 0.0
+        has_B2 = pd.notna(row.get('B2 cation', None)) and row.get('B2 cation', '') != ''
+        x_B1 = (1.0 - x_B2 - x_dop) if has_B2 else (1.0 - x_dop)
+        if not has_B2: x_B2 = 0.0
+        b1 = row.get('B1 cation'); b2 = row.get('B2 cation'); dop = row.get('dopant')
         r_B = 0.0
-        if x_B1 > 0:
-            r_B += x_B1 * IONIC_RADII[row['B1 cation']]
-        if x_B2 > 0 and has_B2:
-            r_B += x_B2 * IONIC_RADII[row['B2 cation']]
-        if x_dop > 0:
-            r_B += x_dop * IONIC_RADII[row['dopant']]
-        
-        r_A = IONIC_RADII['Ba']
+        if x_B1 > 0 and b1 in IONIC_RADII: r_B += x_B1 * IONIC_RADII[b1]
+        if x_B2 > 0 and has_B2 and b2 in IONIC_RADII: r_B += x_B2 * IONIC_RADII[b2]
+        if x_dop > 0 and dop in IONIC_RADII: r_B += x_dop * IONIC_RADII[dop]
         r_O = IONIC_RADII['O']
-        t_factor = (r_A + r_O) / (np.sqrt(2) * (r_B + r_O))
-        
-        chi_B = 0.0
-        if x_B1 > 0:
-            chi_B += x_B1 * ELECTRONEGATIVITY[row['B1 cation']]
-        if x_B2 > 0 and has_B2:
-            chi_B += x_B2 * ELECTRONEGATIVITY[row['B2 cation']]
-        if x_dop > 0:
-            chi_B += x_dop * ELECTRONEGATIVITY[row['dopant']]
-        
-        chi_ratio = chi_B / ELECTRONEGATIVITY['Ba']
-        
-        molar_mass = 0.0
-        molar_mass += x_B1 * MOLAR_MASS[row['B1 cation']]
-        if x_B2 > 0 and has_B2:
-            molar_mass += x_B2 * MOLAR_MASS[row['B2 cation']]
-        if x_dop > 0:
-            molar_mass += x_dop * MOLAR_MASS[row['dopant']]
-        molar_mass += 3 * MOLAR_MASS['O']
-        
-        rho = row['ρ, %'] if pd.notna(row['ρ, %']) else np.nan
-        d = row['d, mkm'] if pd.notna(row['d, mkm']) else np.nan
-        
+        t = (IONIC_RADII['Ba'] + r_O) / (np.sqrt(2) * (r_B + r_O)) if r_B > 0 else np.nan
+        chi = 0.0
+        if x_B1 > 0 and b1 in ELECTRONEGATIVITY: chi += x_B1 * ELECTRONEGATIVITY[b1]
+        if x_B2 > 0 and has_B2 and b2 in ELECTRONEGATIVITY: chi += x_B2 * ELECTRONEGATIVITY[b2]
+        if x_dop > 0 and dop in ELECTRONEGATIVITY: chi += x_dop * ELECTRONEGATIVITY[dop]
+        chi_ratio = chi / ELECTRONEGATIVITY['Ba'] if chi > 0 else np.nan
+        mm = 0.0
+        if x_B1 > 0 and b1 in MOLAR_MASS: mm += x_B1 * MOLAR_MASS[b1]
+        if x_B2 > 0 and has_B2 and b2 in MOLAR_MASS: mm += x_B2 * MOLAR_MASS[b2]
+        if x_dop > 0 and dop in MOLAR_MASS: mm += x_dop * MOLAR_MASS[dop]
+        mm += 3 * MOLAR_MASS['O']
+        rho = row.get('ρ, %', np.nan) if pd.notna(row.get('ρ, %', np.nan)) else np.nan
+        d = row.get('d, mkm', np.nan) if pd.notna(row.get('d, mkm', np.nan)) else np.nan
         porosity = 100 - rho if pd.notna(rho) else np.nan
-        gb_area = 3.722 / d if pd.notna(d) and d > 0 else np.nan
-        
-        desc_df.loc[idx, 'tolerance_factor'] = t_factor
-        desc_df.loc[idx, 'chi_B_avg'] = chi_B
-        desc_df.loc[idx, 'chi_ratio'] = chi_ratio
-        desc_df.loc[idx, 'molar_mass'] = molar_mass
-        desc_df.loc[idx, 'porosity'] = porosity
-        desc_df.loc[idx, 'grain_boundary_area'] = gb_area
-        desc_df.loc[idx, 'x_B1'] = x_B1
-        desc_df.loc[idx, 'x_B2'] = x_B2
-        desc_df.loc[idx, 'x_dop'] = x_dop
-    
-    return desc_df
+        gb = 3.722 / d if pd.notna(d) and d > 0 else np.nan
+        desc.loc[idx, 'tolerance_factor'] = t
+        desc.loc[idx, 'chi_B_avg'] = chi if chi > 0 else np.nan
+        desc.loc[idx, 'chi_ratio'] = chi_ratio
+        desc.loc[idx, 'molar_mass'] = mm
+        desc.loc[idx, 'porosity'] = porosity
+        desc.loc[idx, 'grain_boundary_area'] = gb
+        desc.loc[idx, 'x_B1'] = x_B1
+        desc.loc[idx, 'x_B2'] = x_B2
+        desc.loc[idx, 'x_dop'] = x_dop
+    return desc
 
 @st.cache_data
 def calculate_ea_cached(df_hash, df):
-    """
-    Cached version of Ea calculation.
-    """
-    result = []
-    for idx, row in df.iterrows():
-        if pd.notna(row['Ea (eV)']) and row['Ea (eV)'] != '':
-            result.append(row['Ea (eV)'])
-            continue
-        
-        temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
-                     'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
-                     'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
-                     'σ total, 800', 'σ total, 850', 'σ total, 900']
-        
-        temps = []
-        sigmas = []
-        
-        for col in temp_cols:
+    out = []
+    for _, row in df.iterrows():
+        v = row.get('Ea (eV)', np.nan)
+        if pd.notna(v) and v != '': out.append(float(v)); continue
+        temps, sigmas = [], []
+        for col, T in zip(TEMP_COLS, TEMP_VALUES):
             if col in row.index and pd.notna(row[col]) and row[col] > 0:
-                T = int(col.split(', ')[1])
-                temps.append(T + 273.15)
-                sigmas.append(row[col] * 1e-3)
-        
-        if len(temps) < 2:
-            result.append(np.nan)
-            continue
-        
-        y = np.log(np.array(sigmas) * np.array(temps))
-        x = 1000 / np.array(temps)
-        
+                temps.append(T + 273.15); sigmas.append(row[col] * 1e-3)
+        if len(temps) < 2: out.append(np.nan); continue
         try:
-            slope, intercept = np.polyfit(x, y, 1)
-            ea = -slope * 8.314 / 96485
-            result.append(ea)
-        except:
-            result.append(np.nan)
-    
-    return result
+            y = np.log(np.array(sigmas) * np.array(temps))
+            x = 1000 / np.array(temps)
+            slope, _ = np.polyfit(x, y, 1)
+            out.append(-slope * 8.314 / 96485)
+        except: out.append(np.nan)
+    return out
+
+@st.cache_data
+def compute_curve_features_cached(df_hash, df):
+    feats = pd.DataFrame(index=df.index)
+    for idx, row in df.iterrows():
+        vals = np.array([row.get(c, np.nan) for c in TEMP_COLS], dtype=float)
+        T = np.array(TEMP_VALUES, dtype=float)
+        mask = np.isfinite(vals) & (vals > 0)
+        if mask.sum() < 3:
+            feats.loc[idx, 'curve_valid'] = False
+            continue
+        feats.loc[idx, 'curve_valid'] = True
+        v, t = vals[mask], T[mask]
+        lt = t <= 500; ht = t >= 650
+        if lt.sum() >= 2:
+            try:
+                s_, _ = np.polyfit(1000/(t[lt]+273.15), np.log(v[lt]*(t[lt]+273.15)), 1)
+                feats.loc[idx, 'Ea_LT'] = -s_ * 8.314 / 96485
+            except: pass
+        if ht.sum() >= 2:
+            try:
+                s_, _ = np.polyfit(1000/(t[ht]+273.15), np.log(v[ht]*(t[ht]+273.15)), 1)
+                feats.loc[idx, 'Ea_HT'] = -s_ * 8.314 / 96485
+            except: pass
+        if 'Ea_LT' in feats.columns and 'Ea_HT' in feats.columns:
+            feats.loc[idx, 'Ea_diff'] = feats.loc[idx, 'Ea_HT'] - feats.loc[idx, 'Ea_LT']
+        try:
+            feats.loc[idx, 'sigma_500'] = np.interp(500, t, v)
+            feats.loc[idx, 'sigma_max'] = np.max(v)
+            feats.loc[idx, 'sigma_ratio'] = v[-1] / v[0] if v[0] > 0 else np.nan
+        except: pass
+        try:
+            kernel = interpolate.interp1d(t, np.log(v), kind='linear', fill_value='extrapolate')
+            tg = np.linspace(t.min(), t.max(), 200)
+            d1 = np.gradient(kernel(tg), tg)
+            feats.loc[idx, 'knee_T'] = tg[np.argmax(np.abs(d1))]
+        except: pass
+        feats.loc[idx, 'curve_area'] = np.trapz(np.log(v), t) if len(v) > 1 else np.nan
+    return feats
 
 # ============================================
-# FUNCTION FOR OUTLIER REMOVAL
+# UTILITIES
 # ============================================
 
 def remove_outliers(df, col, n):
-    """
-    Remove n smallest and n largest values from the dataset for a given column.
-    Logic:
-    - If selected value is 1: remove the single smallest and single largest value
-    - If the extreme value appears more than n times, none of those rows are removed
-    - We remove individual rows, not unique values
-    """
-    if n is None or n == 0:
-        return df
-    
-    if col not in df.columns:
-        return df
-    
-    # Get all values sorted
-    values = df[col].dropna().sort_values().values
-    
-    if len(values) <= 2 * n:
-        return df
-    
-    # Find which rows to remove from the low end
-    low_rows_to_remove = []
-    removed_count = 0
-    
-    # Iterate from smallest to largest
-    for val in values:
-        if removed_count >= n:
-            break
-        # Count how many rows have this exact value
-        count = (df[col] == val).sum()
-        # If count <= remaining removals, remove all of them
-        if count <= (n - removed_count):
-            low_rows_to_remove.extend(df[df[col] == val].index.tolist())
-            removed_count += count
-        else:
-            # If count > remaining removals, we cannot remove any of this value
-            break
-    
-    # Find which rows to remove from the high end
-    high_rows_to_remove = []
-    removed_count = 0
-    
-    # Iterate from largest to smallest
-    for val in reversed(values):
-        if removed_count >= n:
-            break
-        # Count how many rows have this exact value
-        count = (df[col] == val).sum()
-        # If count <= remaining removals, remove all of them
-        if count <= (n - removed_count):
-            high_rows_to_remove.extend(df[df[col] == val].index.tolist())
-            removed_count += count
-        else:
-            # If count > remaining removals, we cannot remove any of this value
-            break
-    
-    # Create filter mask - keep rows that are NOT in removal lists
-    rows_to_remove = set(low_rows_to_remove + high_rows_to_remove)
-    mask = ~df.index.isin(rows_to_remove)
-    
-    return df[mask]
+    if n is None or n == 0 or col not in df.columns: return df
+    vals = df[col].dropna().sort_values().values
+    if len(vals) <= 2 * n: return df
+    low, cnt = [], 0
+    for v in vals:
+        if cnt >= n: break
+        c = (df[col] == v).sum()
+        if c <= (n - cnt): low.extend(df[df[col] == v].index.tolist()); cnt += c
+        else: break
+    high, cnt = [], 0
+    for v in reversed(vals):
+        if cnt >= n: break
+        c = (df[col] == v).sum()
+        if c <= (n - cnt): high.extend(df[df[col] == v].index.tolist()); cnt += c
+        else: break
+    return df[~df.index.isin(set(low + high))]
 
-# ============================================
-# FUNCTIONS FOR PLOTTING
-# ============================================
-
-def get_filter_markers(df, active_filters_count):
-    """
-    Determine if custom markers should be used based on active filters count.
-    Returns: (marker_dict or 'o', show_legend (bool), filter_name (str or None))
-
-    Only one filter is used to control marker shapes. When exactly one filter is
-    active (i.e. its categories really split the data), that filter's categories
-    receive markers from COMMON_MARKERS in order. If several filters are active,
-    marker shapes are NOT shown (show_legend=False).
-    """
-    if active_filters_count != 1:
-        return 'o', False, None
-
-    # Find which filter is active (has more than one unique value)
-    for filter_name in FILTER_LABELS.keys():
-        if filter_name in df.columns:
-            unique_vals = df[filter_name].dropna().unique()
-            unique_vals = [v for v in unique_vals if v != '']
-            if len(unique_vals) > 1:
-                # Build marker dict using COMMON_MARKERS in the order of categories
-                marker_dict = {}
-                for i, cat in enumerate(unique_vals):
-                    marker_dict[cat] = COMMON_MARKERS[i % len(COMMON_MARKERS)]
-                return marker_dict, True, filter_name
-
+def get_filter_markers(df, active_count):
+    if active_count != 1: return 'o', False, None
+    for fname in FILTER_LABELS.keys():
+        if fname in df.columns:
+            vals = [v for v in df[fname].dropna().unique() if v != '']
+            if len(vals) > 1:
+                return {v: COMMON_MARKERS[i % len(COMMON_MARKERS)] for i, v in enumerate(vals)}, True, fname
     return 'o', False, None
 
+def humanize_size(s): return COLUMN_LABELS.get(s, s)
+def humanize_filter(f): return FILTER_LABELS.get(f, f)
 
-def _humanize_size_label(size_col_name):
-    """Return a human-readable label for a size descriptor column."""
-    if size_col_name in COLUMN_LABELS:
-        return COLUMN_LABELS[size_col_name]
-    return size_col_name
+def download_plot(fig, filename="plot.png"):
+    buf = io.BytesIO(); fig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
+    buf.seek(0); return buf
 
-
-def _humanize_filter_label(filter_name):
-    """Return a human-readable label for a filter column."""
-    if filter_name in FILTER_LABELS:
-        return FILTER_LABELS[filter_name]
-    return filter_name
-
-
-def _plot_kde_marginal(ax, groups, ylabel, normalize, title):
-    """
-    Plot smoothed KDE marginals on the given axes.
-
-    groups: list of (label, values_array) tuples.
-    normalize: if True, each KDE is normalized to integrate to 1 inside its group
-               (gaussian_kde is already normalized per-sample, so we still scale
-               so that each group's density integrates to 1 over the plot range).
-    """
-    y_min = None
-    y_max = None
-    for _, vals in groups:
-        vals = np.asarray(vals)
-        vals = vals[np.isfinite(vals)]
-        if len(vals) == 0:
-            continue
-        if y_min is None or vals.min() < y_min:
-            y_min = vals.min()
-        if y_max is None or vals.max() > y_max:
-            y_max = vals.max()
-
-    if y_min is None or y_max is None:
-        ax.text(0.5, 0.5, 'No data', ha='center', va='center',
-                transform=ax.transAxes, fontsize=9)
-        ax.set_title(title, fontsize=10, fontweight='bold')
-        ax.set_xlabel(ylabel, fontsize=9, fontweight='bold')
-        return
-
-    span = y_max - y_min
-    if span <= 0:
-        span = 1.0
-    y_grid = np.linspace(y_min - 0.1 * span, y_max + 0.1 * span, 200)
-
-    cmap = plt.get_cmap('viridis')
-    n_groups = max(1, len(groups))
-    for i, (label, vals) in enumerate(groups):
-        vals = np.asarray(vals)
-        vals = vals[np.isfinite(vals)]
-        if len(vals) < 2:
-            continue
-        try:
-            kde = gaussian_kde(vals)
-            dens = kde(y_grid)
-        except Exception:
-            continue
-        if normalize:
-            # Normalize density to integrate to 1 over y_grid
-            peak = np.max(dens) if len(dens) > 0 else 0.0
-            if peak > 0:
-                dens = dens / peak
-        color = cmap(i / max(1, n_groups - 1)) if n_groups > 1 else cmap(0.0)
-        ax.fill_betweenx(y_grid, 0, dens, color=color, alpha=0.35, label=label)
-        ax.plot(dens, y_grid, color=color, linewidth=1.5)
-
-    ax.set_title(title, fontsize=10, fontweight='bold')
-    ax.set_xlabel('Density' if not normalize else 'Normalized density (peak = 1)',
-                  fontsize=9, fontweight='bold')
-    ax.set_ylabel(ylabel, fontsize=9, fontweight='bold')
-    ax.grid(True, alpha=0.3, linestyle='--')
-    if len(groups) > 0:
-        ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.5)
-
-
-def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log, 
-                           palette, title, xlabel, ylabel, zlabel,
-                           marker_style='o', show_legend=False, filter_name=None):
-    plot_data = df.dropna(subset=[x_col, y_col, z_col])
-    
-    if len(plot_data) == 0:
-        st.warning("No data available for plotting")
-        return None
-    
-    x = plot_data[x_col].values
-    y = plot_data[y_col].values
-    z = plot_data[z_col].values
-    
-    if x_log:
-        mask = x > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) == 0:
-            st.warning("All x values ≤ 0, cannot create logarithmic plot")
-            return None
-        x = np.log10(x)
-        xlabel = f'log10({xlabel})'
-    
-    if y_log:
-        mask = y > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(y) == 0:
-            st.warning("All y values ≤ 0, cannot create logarithmic plot")
-            return None
-        y = np.log10(y)
-        ylabel = f'log10({ylabel})'
-    
-    if z_log:
-        mask = z > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(z) == 0:
-            st.warning("All z values ≤ 0, cannot create logarithmic plot")
-            return None
-        z = np.log10(z)
-        zlabel = f'log10({zlabel})'
-    
-    fig, ax = plt.subplots(figsize=(8, 6))
-    
-    if show_legend and isinstance(marker_style, dict) and filter_name is not None:
-        # Use different markers for each category
-        categories = plot_data[filter_name].unique()
-        for cat in categories:
-            mask = plot_data[filter_name] == cat
-            if mask.sum() > 0:
-                marker = marker_style.get(cat, 'o')
-                ax.scatter(x[mask], y[mask], c=z[mask], cmap=palette, 
-                          s=50, marker=marker, edgecolors='black', 
-                          linewidth=0.5, alpha=0.8, label=cat)
-        
-        # Create colorbar from all data
-        scatter = ax.scatter(x, y, c=z, cmap=palette, s=50, 
-                            edgecolors='black', linewidth=0.5, alpha=0.8, visible=False)
-        cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label(zlabel, fontsize=11, fontweight='bold')
-        
-        ax.legend(loc='upper right', frameon=True, framealpha=0.5)
-    else:
-        scatter = ax.scatter(x, y, c=z, cmap=palette, s=50, 
-                            marker=marker_style if isinstance(marker_style, str) else 'o',
-                            edgecolors='black', linewidth=0.5, alpha=0.8)
-        cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label(zlabel, fontsize=11, fontweight='bold')
-    
+def style_axis(ax, xlabel, ylabel, grid=True):
     ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
     ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
+    if grid: ax.grid(True, alpha=0.3, linestyle='--')
+
+def plot_kde_marginal(ax, groups, ylabel, normalize, title):
+    all_vals = np.concatenate([np.asarray(v)[np.isfinite(np.asarray(v, dtype=float))] for _, v in groups if len(v) > 0]) if groups else np.array([])
+    if len(all_vals) == 0:
+        ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title(title, fontsize=10, fontweight='bold'); return
+    lo, hi = np.min(all_vals), np.max(all_vals); span = hi - lo if hi > lo else 1.0
+    grid = np.linspace(lo - 0.1*span, hi + 0.1*span, 200)
+    cmap = plt.get_cmap('viridis'); n = max(1, len(groups))
+    for i, (label, vals) in enumerate(groups):
+        vals = np.asarray(vals, dtype=float); vals = vals[np.isfinite(vals)]
+        if len(vals) < 2: continue
+        try:
+            from scipy.stats import gaussian_kde
+            dens = gaussian_kde(vals)(grid)
+        except: continue
+        if normalize and dens.max() > 0: dens = dens / dens.max()
+        c = cmap(i / max(1, n - 1)) if n > 1 else cmap(0.0)
+        ax.fill_betweenx(grid, 0, dens, color=c, alpha=0.35, label=label)
+        ax.plot(dens, grid, color=c, linewidth=1.5)
+    ax.set_title(title, fontsize=10, fontweight='bold')
+    ax.set_xlabel('Normalized density' if normalize else 'Density', fontsize=9, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=9, fontweight='bold')
     ax.grid(True, alpha=0.3, linestyle='--')
-    
-    plt.tight_layout()
-    return fig
+    if len(groups) > 0: ax.legend(fontsize=8, loc='best', frameon=True, framealpha=0.5)
+
+def build_derived_features(df):
+    df = df.copy()
+    if 'Sintering additive' in df.columns:
+        df['is_additive'] = (df['Sintering additive'] != 'Pure').astype(int)
+    if 'ρ, %' in df.columns:
+        df['density_norm'] = (df['ρ, %'] - df['ρ, %'].mean()) / (df['ρ, %'].std() + 1e-9)
+    if 'T sin' in df.columns:
+        df['Tsin_norm'] = (df['T sin'] - df['T sin'].mean()) / (df['T sin'].std() + 1e-9)
+    if all(c in df.columns for c in ['x_B1', 'x_B2', 'x_dop']):
+        for c in ['x_B1', 'x_B2', 'x_dop']:
+            df[f'clr_{c}'] = np.log(np.clip(df[c], 1e-9, None) + 1e-6)
+        if all(c in df.columns for c in ['clr_x_B1', 'clr_x_B2', 'clr_x_dop']):
+            mean_clr = df[['clr_x_B1', 'clr_x_B2', 'clr_x_dop']].mean(axis=1)
+            for c in ['x_B1', 'x_B2', 'x_dop']:
+                df[f'clr_{c}'] = df[f'clr_{c}'] - mean_clr
+        # canonical ILR basis for 3-part composition
+        try:
+            V = np.array([
+                [1/np.sqrt(2), -1/np.sqrt(2), 0],
+                [1/np.sqrt(6), 1/np.sqrt(6), -2/np.sqrt(6)]
+            ])
+            clr = df[['clr_x_B1', 'clr_x_B2', 'clr_x_dop']].values
+            ilr = clr @ V.T
+            df['ilr_1'] = ilr[:, 0]
+            df['ilr_2'] = ilr[:, 1]
+        except: pass
+    return df
+
+# ============================================
+# BASIC PLOTS
+# ============================================
+
+def create_scatter_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
+                           palette, xlabel, ylabel, zlabel,
+                           marker_style='o', show_legend=False, filter_name=None):
+    d = df.dropna(subset=[x_col, y_col, z_col])
+    if len(d) == 0: return None
+    x, y, z = d[x_col].values, d[y_col].values, d[z_col].values
+    if x_log:
+        m = x > 0
+        if m.sum() == 0: return None
+        x, y, z, d = x[m], y[m], z[m], d[m]; xlabel = f'log10({xlabel})'; x = np.log10(x)
+    if y_log:
+        m = y > 0
+        if m.sum() == 0: return None
+        x, y, z, d = x[m], y[m], z[m], d[m]; ylabel = f'log10({ylabel})'; y = np.log10(y)
+    if z_log:
+        m = z > 0
+        if m.sum() == 0: return None
+        x, y, z, d = x[m], y[m], z[m], d[m]; zlabel = f'log10({zlabel})'; z = np.log10(z)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    if show_legend and isinstance(marker_style, dict) and filter_name is not None:
+        for cat in d[filter_name].unique():
+            m = d[filter_name] == cat
+            if m.sum() > 0:
+                ax.scatter(x[m], y[m], c=z[m], cmap=palette, s=50, marker=marker_style.get(cat, 'o'),
+                           edgecolors='black', linewidth=0.5, alpha=0.8, label=str(cat))
+        sc = ax.scatter(x, y, c=z, cmap=palette, s=0, visible=False)
+        cbar = plt.colorbar(sc, ax=ax); cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+        ax.legend(loc='upper right', frameon=True, framealpha=0.5)
+    else:
+        sc = ax.scatter(x, y, c=z, cmap=palette, s=50,
+                        marker=marker_style if isinstance(marker_style, str) else 'o',
+                        edgecolors='black', linewidth=0.5, alpha=0.8)
+        cbar = plt.colorbar(sc, ax=ax); cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+    style_axis(ax, xlabel, ylabel); plt.tight_layout(); return fig
 
 def create_contour_heatmap(df, x_col, y_col, z_col, x_log, y_log, z_log,
-                           palette, title, xlabel, ylabel, zlabel, 
-                           grid_resolution=50, show_contour_lines=True,
-                           show_contour_labels=True):
-    plot_data = df.dropna(subset=[x_col, y_col, z_col])
-    
-    if len(plot_data) < 4:
-        st.warning("Not enough data for contour plot (minimum 4 points required)")
-        return None
-    
-    x = plot_data[x_col].values
-    y = plot_data[y_col].values
-    z = plot_data[z_col].values
-    
+                           palette, xlabel, ylabel, zlabel,
+                           grid_resolution=50, show_lines=True, show_labels=True):
+    d = df.dropna(subset=[x_col, y_col, z_col])
+    if len(d) < 4: return None
+    x, y, z = d[x_col].values, d[y_col].values, d[z_col].values
     if x_log:
-        mask = x > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) < 4:
-            st.warning("Not enough data after logarithmic transformation")
-            return None
-        x = np.log10(x)
-        xlabel = f'log10({xlabel})'
-    
+        m = x > 0
+        if m.sum() < 4: return None
+        x, y, z = x[m], y[m], z[m]; x = np.log10(x); xlabel = f'log10({xlabel})'
     if y_log:
-        mask = y > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) < 4:
-            st.warning("Not enough data after logarithmic transformation")
-            return None
-        y = np.log10(y)
-        ylabel = f'log10({ylabel})'
-    
+        m = y > 0
+        if m.sum() < 4: return None
+        x, y, z = x[m], y[m], z[m]; y = np.log10(y); ylabel = f'log10({ylabel})'
     if z_log:
-        mask = z > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) < 4:
-            st.warning("Not enough data after logarithmic transformation")
-            return None
-        z = np.log10(z)
-        zlabel = f'log10({zlabel})'
-    
+        m = z > 0
+        if m.sum() < 4: return None
+        x, y, z = x[m], y[m], z[m]; z = np.log10(z); zlabel = f'log10({zlabel})'
     xi = np.linspace(x.min(), x.max(), grid_resolution)
     yi = np.linspace(y.min(), y.max(), grid_resolution)
     xi, yi = np.meshgrid(xi, yi)
-    
-    try:
-        zi = griddata((x, y), z, (xi, yi), method='cubic')
+    try: zi = interpolate.griddata((x, y), z, (xi, yi), method='cubic')
     except:
-        try:
-            zi = griddata((x, y), z, (xi, yi), method='linear')
-        except:
-            st.warning("Failed to interpolate data")
-            return None
-    
+        try: zi = interpolate.griddata((x, y), z, (xi, yi), method='linear')
+        except: return None
     fig, ax = plt.subplots(figsize=(8, 6))
-    
-    # Create filled contour with smooth color transition
-    contour = ax.contourf(xi, yi, zi, levels=30, cmap=palette, alpha=0.85)
-    
-    # Add contour lines if requested
-    if show_contour_lines:
-        contour_lines = ax.contour(xi, yi, zi, levels=15, colors='black', 
-                                   linewidths=0.5, alpha=0.4)
-        if show_contour_labels:
-            ax.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.2f')
-    
-    # Plot original data points
-    ax.scatter(x, y, color='red', s=30, edgecolors='white', 
-               linewidth=1, alpha=0.7, label='Data points')
-    
-    cbar = plt.colorbar(contour, ax=ax)
-    cbar.set_label(zlabel, fontsize=11, fontweight='bold')
-    
-    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
-    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3, linestyle='--')
-    
-    plt.tight_layout()
-    return fig
+    cf = ax.contourf(xi, yi, zi, levels=30, cmap=palette, alpha=0.85)
+    if show_lines:
+        cl = ax.contour(xi, yi, zi, levels=15, colors='black', linewidths=0.5, alpha=0.4)
+        if show_labels: ax.clabel(cl, inline=True, fontsize=8, fmt='%1.2f')
+    ax.scatter(x, y, c='red', s=30, edgecolors='white', linewidth=1, alpha=0.7, label='Data')
+    cbar = plt.colorbar(cf, ax=ax); cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+    style_axis(ax, xlabel, ylabel); ax.legend(loc='upper right'); plt.tight_layout(); return fig
 
 def create_3d_surface(df, x_col, y_col, z_col, x_log, y_log, z_log,
-                      palette, title, xlabel, ylabel, zlabel):
-    plot_data = df.dropna(subset=[x_col, y_col, z_col])
-    
-    if len(plot_data) < 4:
-        st.warning("Not enough data for 3D surface plot (minimum 4 points required)")
-        return None
-    
-    x = plot_data[x_col].values
-    y = plot_data[y_col].values
-    z = plot_data[z_col].values
-    
+                      palette, xlabel, ylabel, zlabel, n_bootstrap=200):
+    d = df.dropna(subset=[x_col, y_col, z_col])
+    if len(d) < 4: return None
+    x, y, z = d[x_col].values, d[y_col].values, d[z_col].values
     if x_log:
-        mask = x > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) < 4:
-            st.warning("Not enough data after logarithmic transformation")
-            return None
-        x = np.log10(x)
-        xlabel = f'log10({xlabel})'
-    
+        m = x > 0
+        if m.sum() < 4: return None
+        x, y, z = x[m], y[m], z[m]; x = np.log10(x); xlabel = f'log10({xlabel})'
     if y_log:
-        mask = y > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) < 4:
-            st.warning("Not enough data after logarithmic transformation")
-            return None
-        y = np.log10(y)
-        ylabel = f'log10({ylabel})'
-    
+        m = y > 0
+        if m.sum() < 4: return None
+        x, y, z = x[m], y[m], z[m]; y = np.log10(y); ylabel = f'log10({ylabel})'
     if z_log:
-        mask = z > 0
-        x = x[mask]
-        y = y[mask]
-        z = z[mask]
-        if len(x) < 4:
-            st.warning("Not enough data after logarithmic transformation")
-            return None
-        z = np.log10(z)
-        zlabel = f'log10({zlabel})'
-    
-    xi = np.linspace(x.min(), x.max(), 30)
-    yi = np.linspace(y.min(), y.max(), 30)
-    xi, yi = np.meshgrid(xi, yi)
-    
-    try:
-        zi = griddata((x, y), z, (xi, yi), method='cubic')
+        m = z > 0
+        if m.sum() < 4: return None
+        x, y, z = x[m], y[m], z[m]; z = np.log10(z); zlabel = f'log10({zlabel})'
+    xi = np.linspace(x.min(), x.max(), 30); yi = np.linspace(y.min(), y.max(), 30)
+    xi_g, yi_g = np.meshgrid(xi, yi)
+    try: zi = interpolate.griddata((x, y), z, (xi_g, yi_g), method='cubic')
     except:
+        try: zi = interpolate.griddata((x, y), z, (xi_g, yi_g), method='linear')
+        except: return None
+    bands = []
+    n = len(x)
+    for _ in range(min(n_bootstrap, 100)):
+        idx = np.random.choice(n, n, replace=True)
         try:
-            zi = griddata((x, y), z, (xi, yi), method='linear')
-        except:
-            st.warning("Failed to interpolate data for 3D plot")
-            return None
-    
+            zb = interpolate.griddata((x[idx], y[idx]), z[idx], (xi_g, yi_g), method='linear')
+            bands.append(zb)
+        except: pass
+    std = np.nanstd(np.stack(bands, axis=0), axis=0) if len(bands) > 10 else None
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    
-    surf = ax.plot_surface(xi, yi, zi, cmap=palette, alpha=0.8, 
-                           linewidth=0, antialiased=True)
-    
-    ax.scatter(x, y, z, color='red', s=30, alpha=0.7, label='Data points')
-    
-    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
-    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
-    ax.set_zlabel(zlabel, fontsize=11, fontweight='bold')
-    
-    cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
-    cbar.set_label(zlabel, fontsize=11, fontweight='bold')
-    
-    plt.tight_layout()
-    return fig
+    surf = ax.plot_surface(xi_g, yi_g, zi, cmap=palette, alpha=0.8, linewidth=0, antialiased=True)
+    if std is not None:
+        try:
+            ax.plot_surface(xi_g, yi_g, zi + std, alpha=0.1, color='blue', linewidth=0)
+            ax.plot_surface(xi_g, yi_g, zi - std, alpha=0.1, color='blue', linewidth=0)
+        except: pass
+    ax.scatter(x, y, z, c='red', s=30, alpha=0.7)
+    ax.set_xlabel(xlabel, fontweight='bold'); ax.set_ylabel(ylabel, fontweight='bold'); ax.set_zlabel(zlabel, fontweight='bold')
+    fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10).set_label(zlabel, fontweight='bold')
+    plt.tight_layout(); return fig
 
-def create_bubble_chart(df, x_col, y_col, color_col, size_col, 
-                        x_log, y_log, color_log, size_log,
-                        palette, title, xlabel, ylabel,
-                        marker_style='o', show_legend=False, filter_name=None,
-                        size_col_name=None, filter_display_name=None,
+def create_contour_with_bands(df, x_col, y_col, z_col, x_log, y_log, z_log,
+                              palette, xlabel, ylabel, zlabel,
+                              grid_resolution=50, n_bootstrap=200):
+    d = df.dropna(subset=[x_col, y_col, z_col])
+    if len(d) < 5: return None
+    x, y, z = d[x_col].values, d[y_col].values, d[z_col].values
+    if x_log:
+        m = x > 0
+        if m.sum() < 5: return None
+        x, y, z = x[m], y[m], z[m]; x = np.log10(x); xlabel = f'log10({xlabel})'
+    if y_log:
+        m = y > 0
+        if m.sum() < 5: return None
+        x, y, z = x[m], y[m], z[m]; y = np.log10(y); ylabel = f'log10({ylabel})'
+    if z_log:
+        m = z > 0
+        if m.sum() < 5: return None
+        x, y, z = x[m], y[m], z[m]; z = np.log10(z); zlabel = f'log10({zlabel})'
+    xi = np.linspace(x.min(), x.max(), grid_resolution)
+    yi = np.linspace(y.min(), y.max(), grid_resolution)
+    xi_g, yi_g = np.meshgrid(xi, yi)
+    try: zi = interpolate.griddata((x, y), z, (xi_g, yi_g), method='cubic')
+    except:
+        try: zi = interpolate.griddata((x, y), z, (xi_g, yi_g), method='linear')
+        except: return None
+    bands = []
+    n = len(x)
+    for _ in range(n_bootstrap):
+        idx = np.random.choice(n, n, replace=True)
+        try:
+            zb = interpolate.griddata((x[idx], y[idx]), z[idx], (xi_g, yi_g), method='linear')
+            bands.append(zb)
+        except: pass
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cf = ax.contourf(xi_g, yi_g, zi, levels=30, cmap=palette, alpha=0.85)
+    if len(bands) > 10:
+        bands_arr = np.stack(bands, axis=0)
+        std = np.nanstd(bands_arr, axis=0)
+        try: ax.contour(xi_g, yi_g, std, levels=5, colors='blue', linewidths=1.0, linestyles='--')
+        except: pass
+    ax.scatter(x, y, c='red', s=30, edgecolors='white', linewidth=1, alpha=0.7, label='Data')
+    cbar = plt.colorbar(cf, ax=ax); cbar.set_label(zlabel, fontsize=11, fontweight='bold')
+    style_axis(ax, xlabel, ylabel); ax.legend(loc='upper right'); plt.tight_layout(); return fig
+
+def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, color_log, size_log,
+                        palette, xlabel, ylabel, marker_style='o', show_legend=False,
+                        filter_name=None, size_col_name=None, filter_display_name=None,
                         show_marginals=False, normalize_marginals=False,
                         size_col_raw=None, y_col_raw=None):
-    plot_data = df.dropna(subset=[x_col, y_col, color_col, size_col]).copy()
-    
-    if len(plot_data) == 0:
-        st.warning("No data available for plotting")
-        return None
-    
-    # Keep raw size for terciles (before log transform)
-    if size_col_raw is not None and size_col_raw in plot_data.columns:
-        raw_size_series = plot_data[size_col_raw].copy()
-    else:
-        raw_size_series = plot_data[size_col].copy()
-    
-    # Keep raw y for marginals (before log transform)
-    if y_col_raw is not None and y_col_raw in plot_data.columns:
-        raw_y_series = plot_data[y_col_raw].copy()
-    else:
-        raw_y_series = plot_data[y_col].copy()
-    
-    x = plot_data[x_col].values
-    y = plot_data[y_col].values
-    colors = plot_data[color_col].values
-    sizes = plot_data[size_col].values
-    
+    d = df.dropna(subset=[x_col, y_col, color_col, size_col]).copy()
+    if len(d) == 0: return None
+    raw_s = d[size_col_raw].copy() if size_col_raw and size_col_raw in d.columns else d[size_col].copy()
+    raw_y = d[y_col_raw].copy() if y_col_raw and y_col_raw in d.columns else d[y_col].copy()
+    x, y, c, s = d[x_col].values, d[y_col].values, d[color_col].values, d[size_col].values
     if x_log:
-        mask = x > 0
-        x = x[mask]
-        y = y[mask]
-        colors = colors[mask]
-        sizes = sizes[mask]
-        plot_data = plot_data[mask]
-        raw_size_series = raw_size_series[mask]
-        raw_y_series = raw_y_series[mask]
-        if len(x) == 0:
-            st.warning("All x values ≤ 0, cannot create logarithmic plot")
-            return None
-        x = np.log10(x)
-        xlabel = f'log10({xlabel})'
-    
+        m = x > 0
+        if m.sum() == 0: return None
+        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
+        x = np.log10(x); xlabel = f'log10({xlabel})'
     if y_log:
-        mask = y > 0
-        x = x[mask]
-        y = y[mask]
-        colors = colors[mask]
-        sizes = sizes[mask]
-        plot_data = plot_data[mask]
-        raw_size_series = raw_size_series[mask]
-        raw_y_series = raw_y_series[mask]
-        if len(y) == 0:
-            st.warning("All y values ≤ 0, cannot create logarithmic plot")
-            return None
-        y = np.log10(y)
-        ylabel = f'log10({ylabel})'
-    
+        m = y > 0
+        if m.sum() == 0: return None
+        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
+        y = np.log10(y); ylabel = f'log10({ylabel})'
     if color_log:
-        mask = colors > 0
-        x = x[mask]
-        y = y[mask]
-        colors = colors[mask]
-        sizes = sizes[mask]
-        plot_data = plot_data[mask]
-        raw_size_series = raw_size_series[mask]
-        raw_y_series = raw_y_series[mask]
-        if len(colors) == 0:
-            st.warning("All color values ≤ 0, cannot create logarithmic plot")
-            return None
-        colors = np.log10(colors)
-    
+        m = c > 0
+        if m.sum() == 0: return None
+        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
+        c = np.log10(c)
     if size_log:
-        mask = sizes > 0
-        x = x[mask]
-        y = y[mask]
-        colors = colors[mask]
-        sizes = sizes[mask]
-        plot_data = plot_data[mask]
-        raw_size_series = raw_size_series[mask]
-        raw_y_series = raw_y_series[mask]
-        if len(sizes) == 0:
-            st.warning("All size values ≤ 0, cannot create logarithmic plot")
-            return None
-        sizes = np.log10(sizes)
-    
-    # Scale bubble sizes for the plot
-    if len(sizes) > 0:
-        size_min, size_max = sizes.min(), sizes.max()
-        if size_max > size_min:
-            sizes_scaled = 20 + 180 * (sizes - size_min) / (size_max - size_min)
-        else:
-            sizes_scaled = np.ones_like(sizes) * 50
-    else:
-        sizes_scaled = np.ones_like(sizes) * 50
-    
-    # Determine whether we should build the marginal figure layout
-    build_marginals = False
-    if show_marginals:
-        has_size_groups = (size_col_name is not None) and (size_col_raw is not None)
-        has_filter_groups = (filter_display_name is not None) and (filter_name is not None) and show_legend
-        build_marginals = has_size_groups or has_filter_groups
-    
-    if build_marginals:
-        n_marginals = 0
-        if (size_col_name is not None) and (size_col_raw is not None):
-            n_marginals += 1
-        if (filter_display_name is not None) and (filter_name is not None) and show_legend:
-            n_marginals += 1
-        # Layout: top = main chart (spans full width), bottom row = marginal plots
-        fig = plt.figure(figsize=(8 + 3 * n_marginals, 9))
-        gs = fig.add_gridspec(2, n_marginals,
-                              height_ratios=[3, 1.2],
-                              hspace=0.35, wspace=0.35)
+        m = s > 0
+        if m.sum() == 0: return None
+        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
+        s = np.log10(s)
+    if len(s) > 0:
+        smin, smax = s.min(), s.max()
+        s_sc = 20 + 180*(s - smin)/(smax - smin) if smax > smin else np.ones_like(s)*50
+    else: s_sc = np.ones_like(s)*50
+
+    build_marg = show_marginals and ((size_col_name is not None and size_col_raw is not None) or
+                                     (filter_display_name is not None and filter_name is not None and show_legend))
+    if build_marg:
+        n_m = int(size_col_name is not None and size_col_raw is not None) + \
+              int(filter_display_name is not None and filter_name is not None and show_legend)
+        fig = plt.figure(figsize=(8 + 3*n_m, 9))
+        gs = fig.add_gridspec(2, n_m, height_ratios=[3, 1.2], hspace=0.35, wspace=0.35)
         ax = fig.add_subplot(gs[0, :])
-        marginal_axes = []
-        for i in range(n_marginals):
-            marginal_axes.append(fig.add_subplot(gs[1, i]))
+        marg_axes = [fig.add_subplot(gs[1, i]) for i in range(n_m)]
     else:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        marginal_axes = []
-    
-    import matplotlib.lines as mlines
-    from matplotlib.legend_handler import HandlerLine2D
-    
-    # Human-readable legend titles
-    if filter_display_name is not None:
-        filter_title = _humanize_filter_label(filter_display_name) + ':'
-    else:
-        filter_title = 'Category:'
-    
-    if size_col_name is not None:
-        size_title = _humanize_size_label(size_col_name) + ':'
-    else:
-        size_title = 'Size:'
-    
+        fig, ax = plt.subplots(figsize=(8, 6)); marg_axes = []
+
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
-        # Use different markers for each category
-        categories = plot_data[filter_name].unique()
-        for cat in categories:
-            mask = plot_data[filter_name] == cat
-            if mask.sum() > 0:
-                marker = marker_style.get(cat, 'o')
-                ax.scatter(x[mask], y[mask], c=colors[mask], 
-                          s=sizes_scaled[mask], cmap=palette,
-                          marker=marker, alpha=0.7, edgecolors='black', 
-                          linewidth=0.5, label=cat)
-        
-        # Create colorbar from all data
-        scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
-                            cmap=palette, alpha=0.7, edgecolors='black', 
-                            linewidth=0.5, visible=False)
-        cbar = plt.colorbar(scatter, ax=ax)
-        if color_log:
-            cbar.set_label(f'log10({plot_data[color_col].name})', 
-                          fontsize=11, fontweight='bold')
-        else:
-            cbar.set_label(plot_data[color_col].name, 
-                          fontsize=11, fontweight='bold')
-        
-        # Prepare size legend entries with FIXED visual sizes
-        if size_log:
-            size_label = f'log10({_humanize_size_label(size_col_name)})' if size_col_name is not None else 'log10(size)'
-        else:
-            size_label = _humanize_size_label(size_col_name) if size_col_name is not None else 'Size'
-        
-        # Calculate min, median, max values for the legend
-        size_min_val = sizes.min() if len(sizes) > 0 else 1
-        size_median_val = np.percentile(sizes, 50) if len(sizes) > 0 else 2
-        size_max_val = sizes.max() if len(sizes) > 0 else 3
-        
-        # Fixed marker sizes for legend (always small, medium, large)
-        # These are the actual marker sizes in points
-        LEGEND_SMALL_SIZE = 20
-        LEGEND_MEDIUM_SIZE = 60
-        LEGEND_LARGE_SIZE = 150
-        
-        # Create FIRST LEGEND: category with FIXED marker size
-        category_handles = []
-        category_labels = []
-        
-        unique_categories = plot_data[filter_name].unique()
-        
-        for cat in unique_categories:
-            marker = marker_style.get(cat, 'o')
-            handle = mlines.Line2D([0], [0], marker=marker, color='w',
-                                  label=cat,
-                                  markersize=10,
-                                  markerfacecolor='gray',
-                                  markeredgecolor='black',
-                                  linestyle='None')
-            category_handles.append(handle)
-            category_labels.append(cat)
-        
-        legend1 = ax.legend(category_handles, category_labels, title=filter_title,
-                           loc='upper left', frameon=True, framealpha=0.5)
-        
-        ax.add_artist(legend1)
-        
-        # Create SECOND LEGEND: Size values with FIXED visual sizes
-        # Always show small, medium, large markers regardless of data range
-        size_handles = []
-        size_labels = []
-        
-        # Small marker
-        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Min: {size_min_val:.3f}',
-                          markersize=np.sqrt(LEGEND_SMALL_SIZE/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-        size_labels.append(f'Min: {size_min_val:.3f}')
-        
-        # Medium marker
-        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Median: {size_median_val:.3f}',
-                          markersize=np.sqrt(LEGEND_MEDIUM_SIZE/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-        size_labels.append(f'Median: {size_median_val:.3f}')
-        
-        # Large marker
-        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Max: {size_max_val:.3f}',
-                          markersize=np.sqrt(LEGEND_LARGE_SIZE/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-        size_labels.append(f'Max: {size_max_val:.3f}')
-        
-        legend2 = ax.legend(size_handles, size_labels, title=size_title,
-                           loc='upper right', frameon=True, framealpha=0.5)
-        
-        ax.add_artist(legend2)
-        
+        for cat in d[filter_name].unique():
+            m = d[filter_name] == cat
+            if m.sum() > 0:
+                ax.scatter(x[m], y[m], c=c[m], s=s_sc[m], cmap=palette, marker=marker_style.get(cat, 'o'),
+                           alpha=0.7, edgecolors='black', linewidth=0.5, label=str(cat))
+        sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5, visible=False)
+        plt.colorbar(sc, ax=ax).set_label(d[color_col].name, fontsize=11, fontweight='bold')
+        leg1 = ax.legend(loc='upper left', frameon=True, framealpha=0.5,
+                         title=humanize_filter(filter_display_name) + ':' if filter_display_name else 'Category:')
+        ax.add_artist(leg1)
     else:
-        scatter = ax.scatter(x, y, c=colors, s=sizes_scaled, 
-                            cmap=palette, alpha=0.7, edgecolors='black', 
-                            linewidth=0.5, marker=marker_style if isinstance(marker_style, str) else 'o')
-        
-        cbar = plt.colorbar(scatter, ax=ax)
-        if color_log:
-            cbar.set_label(f'log10({plot_data[color_col].name})', 
-                          fontsize=11, fontweight='bold')
-        else:
-            cbar.set_label(plot_data[color_col].name, 
-                          fontsize=11, fontweight='bold')
-        
-        # Add size legend only with FIXED visual sizes
-        if size_log:
-            size_label = f'log10({_humanize_size_label(size_col_name)})' if size_col_name is not None else 'log10(size)'
-        else:
-            size_label = _humanize_size_label(size_col_name) if size_col_name is not None else 'Size'
-        
-        size_min_val = sizes.min() if len(sizes) > 0 else 1
-        size_median_val = np.percentile(sizes, 50) if len(sizes) > 0 else 2
-        size_max_val = sizes.max() if len(sizes) > 0 else 3
-        
-        # Fixed marker sizes for legend
-        LEGEND_SMALL_SIZE = 20
-        LEGEND_MEDIUM_SIZE = 60
-        LEGEND_LARGE_SIZE = 150
-        
-        size_handles = []
-        size_labels = []
-        
-        # Small marker
-        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Min: {size_min_val:.3f}',
-                          markersize=np.sqrt(LEGEND_SMALL_SIZE/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-        size_labels.append(f'Min: {size_min_val:.3f}')
-        
-        # Medium marker
-        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Median: {size_median_val:.3f}',
-                          markersize=np.sqrt(LEGEND_MEDIUM_SIZE/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-        size_labels.append(f'Median: {size_median_val:.3f}')
-        
-        # Large marker
-        size_handles.append(mlines.Line2D([0], [0], marker='o', color='w',
-                          label=f'Max: {size_max_val:.3f}',
-                          markersize=np.sqrt(LEGEND_LARGE_SIZE/2),
-                          markerfacecolor='gray', 
-                          markeredgecolor='black'))
-        size_labels.append(f'Max: {size_max_val:.3f}')
-        
-        ax.legend(size_handles, size_labels, title=size_title,
-                  loc='upper right', frameon=True, framealpha=0.5)
-    
-    ax.set_xlabel(xlabel, fontsize=11, fontweight='bold')
-    ax.set_ylabel(ylabel, fontsize=11, fontweight='bold')
-    ax.grid(True, alpha=0.3, linestyle='--')
-    
-    # ============================================
-    # MARGINAL DISTRIBUTIONS (ggside style)
-    # ============================================
-    if build_marginals and len(marginal_axes) > 0:
-        # Y values used for the marginal distributions (raw, before log transform)
-        y_raw_vals = np.asarray(raw_y_series.values, dtype=float)
-        
-        y_marg_label = ylabel
-        
-        ax_idx = 0
-        
-        # 1) Marginal by size terciles
-        if (size_col_name is not None) and (size_col_raw is not None):
-            size_raw_vals = np.asarray(raw_size_series.values, dtype=float)
-            mask_finite = np.isfinite(size_raw_vals) & np.isfinite(y_raw_vals)
-            size_ok = size_raw_vals[mask_finite]
-            y_ok = y_raw_vals[mask_finite]
-            if len(size_ok) >= 3:
-                q33 = np.percentile(size_ok, 33.333)
-                q66 = np.percentile(size_ok, 66.667)
-                g1_mask = size_ok <= q33
-                g2_mask = (size_ok > q33) & (size_ok <= q66)
-                g3_mask = size_ok > q66
-                groups = []
-                if g1_mask.sum() > 0:
-                    groups.append(('0–33%', y_ok[g1_mask]))
-                if g2_mask.sum() > 0:
-                    groups.append(('33–66%', y_ok[g2_mask]))
-                if g3_mask.sum() > 0:
-                    groups.append(('66–100%', y_ok[g3_mask]))
-                _plot_kde_marginal(
-                    marginal_axes[ax_idx],
-                    groups,
-                    y_marg_label,
-                    normalize_marginals,
-                    f'Y distribution by {_humanize_size_label(size_col_name)} terciles'
-                )
-            else:
-                marginal_axes[ax_idx].text(0.5, 0.5, 'Not enough data',
-                                            ha='center', va='center',
-                                            transform=marginal_axes[ax_idx].transAxes,
-                                            fontsize=9)
-                marginal_axes[ax_idx].set_title(
-                    f'Y distribution by {_humanize_size_label(size_col_name)} terciles',
-                    fontsize=10, fontweight='bold')
-            ax_idx += 1
-        
-        # 2) Marginal by active filter categories
-        if (filter_display_name is not None) and (filter_name is not None) and show_legend:
-            cats = plot_data[filter_name].values
-            mask_finite = pd.notna(cats) & np.isfinite(y_raw_vals)
-            cats_ok = cats[mask_finite]
-            y_ok = y_raw_vals[mask_finite]
+        sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5,
+                        marker=marker_style if isinstance(marker_style, str) else 'o')
+        plt.colorbar(sc, ax=ax).set_label(d[color_col].name, fontsize=11, fontweight='bold')
+    if size_col_name is not None:
+        size_title = humanize_size(size_col_name) + ':'
+        if len(s) > 0: lo, med, hi = s.min(), np.percentile(s, 50), s.max()
+        else: lo, med, hi = 1, 2, 3
+        handles = [mlines.Line2D([0], [0], marker='o', color='w', markersize=np.sqrt(ms/2),
+                                  markerfacecolor='gray', markeredgecolor='black',
+                                  label=f'{lbl}: {v:.3f}')
+                   for ms, lbl, v in [(20, 'Min', lo), (60, 'Median', med), (150, 'Max', hi)]]
+        ax.legend(handles=handles, title=size_title, loc='upper right', frameon=True, framealpha=0.5)
+    style_axis(ax, xlabel, ylabel)
+
+    if build_marg and len(marg_axes) > 0:
+        y_raw_arr = np.asarray(raw_y.values, dtype=float)
+        ax_i = 0
+        if size_col_name is not None and size_col_raw is not None:
+            s_raw = np.asarray(raw_s.values, dtype=float)
+            mask = np.isfinite(s_raw) & np.isfinite(y_raw_arr)
+            sr, yr = s_raw[mask], y_raw_arr[mask]
+            if len(sr) >= 3:
+                q33, q66 = np.percentile(sr, 33.333), np.percentile(sr, 66.667)
+                groups = [(n_, yr[m]) for n_, m in [('0–33%', sr <= q33), ('33–66%', (sr > q33) & (sr <= q66)), ('66–100%', sr > q66)] if m.sum() > 0]
+                plot_kde_marginal(marg_axes[ax_i], groups, ylabel, normalize_marginals,
+                                  f'Y by {humanize_size(size_col_name)} terciles')
+            ax_i += 1
+        if filter_display_name is not None and filter_name is not None and show_legend:
+            cats = d[filter_name].values
             groups = []
-            for cat in pd.unique(cats_ok):
-                vals = y_ok[cats_ok == cat]
-                if len(vals) > 0:
-                    groups.append((str(cat), vals))
-            _plot_kde_marginal(
-                marginal_axes[ax_idx],
-                groups,
-                y_marg_label,
-                normalize_marginals,
-                f'Y distribution by {_humanize_filter_label(filter_display_name)}'
-            )
-            ax_idx += 1
-    
-    plt.tight_layout()
-    return fig
+            for cat in pd.unique(cats):
+                vals = y_raw_arr[cats == cat]; vals = vals[np.isfinite(vals)]
+                if len(vals) > 0: groups.append((str(cat), vals))
+            plot_kde_marginal(marg_axes[ax_i], groups, ylabel, normalize_marginals,
+                              f'Y by {humanize_filter(filter_display_name)}')
+    plt.tight_layout(); return fig
 
 # ============================================
-# FUNCTION FOR DOWNLOADING PLOTS
+# NEW PLOTS
 # ============================================
 
-def download_plot(fig, filename="plot.png"):
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=600, bbox_inches='tight')
-    buf.seek(0)
-    return buf
+def plot_pairplot(df, cols, hue_col=None, palette='viridis'):
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 2: return None
+    d = df[cols + ([hue_col] if hue_col and hue_col in df.columns else [])].dropna()
+    if len(d) < 3: return None
+    n = len(cols)
+    fig, axes = plt.subplots(n, n, figsize=(3*n, 3*n))
+    if hue_col and hue_col in d.columns:
+        cats = d[hue_col].unique(); cmap = plt.get_cmap(palette)
+        colors = {c: cmap(i/max(1, len(cats)-1)) for i, c in enumerate(cats)}
+    else: colors = None
+    for i in range(n):
+        for j in range(n):
+            ax = axes[i, j] if n > 1 else axes
+            if i == j: ax.hist(d[cols[i]], bins=15, alpha=0.6, edgecolor='black')
+            else:
+                if colors:
+                    for c in d[hue_col].unique():
+                        sub = d[d[hue_col] == c]
+                        ax.scatter(sub[cols[j]], sub[cols[i]], s=15, alpha=0.6, c=[colors[c]],
+                                   edgecolors='black', linewidth=0.3)
+                else:
+                    ax.scatter(d[cols[j]], d[cols[i]], s=15, alpha=0.6, c='steelblue',
+                               edgecolors='black', linewidth=0.3)
+                try:
+                    z = np.polyfit(d[cols[j]], d[cols[i]], 1)
+                    xx = np.linspace(d[cols[j]].min(), d[cols[j]].max(), 10)
+                    ax.plot(xx, np.polyval(z, xx), 'r--', linewidth=0.8, alpha=0.7)
+                except: pass
+            if i == n - 1: ax.set_xlabel(cols[j], fontsize=8, fontweight='bold')
+            if j == 0: ax.set_ylabel(cols[i], fontsize=8, fontweight='bold')
+            ax.tick_params(labelsize=7)
+    plt.tight_layout(); return fig
+
+def plot_violin_box(df, y_col, group_col, log_y=False):
+    d = df[[y_col, group_col]].dropna()
+    if len(d) < 3: return None
+    grouped = list(d.groupby(group_col))
+    groups = [g[y_col].values for _, g in grouped if len(g) > 0]
+    labels = [str(name) for name, g in grouped if len(g) > 0]
+    if len(groups) < 1: return None
+    fig, ax = plt.subplots(figsize=(max(6, 1.2*len(groups)), 5))
+    if log_y:
+        groups_plot = [np.log10(np.clip(g, 1e-10, None)) for g in groups]; ylab = f'log10({y_col})'
+    else:
+        groups_plot = groups; ylab = y_col
+    parts = ax.violinplot(groups_plot, showmeans=False, showmedians=True, widths=0.7)
+    for pc in parts['bodies']: pc.set_facecolor('steelblue'); pc.set_alpha(0.5); pc.set_edgecolor('black')
+    bp = ax.boxplot(groups_plot, widths=0.15, patch_artist=True, showfliers=False)
+    for box in bp['boxes']: box.set_facecolor('white'); box.set_edgecolor('black')
+    for i, g in enumerate(groups_plot):
+        jitter = np.random.normal(0, 0.05, len(g))
+        ax.scatter(np.ones_like(g)*(i+1)+jitter, g, s=8, alpha=0.4, color='black')
+    ax.set_xticks(range(1, len(labels)+1)); ax.set_xticklabels(labels, rotation=30, ha='right')
+    style_axis(ax, group_col, ylab); plt.tight_layout(); return fig
+
+def plot_parallel_coordinates(df, cols, hue_col=None, palette='viridis'):
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 2: return None
+    d = df[cols + ([hue_col] if hue_col and hue_col in df.columns else [])].dropna()
+    if len(d) < 2: return None
+    if SKLEARN_OK:
+        norm = StandardScaler().fit_transform(d[cols])
+    else:
+        norm = (d[cols] - d[cols].mean()) / (d[cols].std() + 1e-9)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    if hue_col and hue_col in d.columns:
+        cats = d[hue_col].unique(); cmap = plt.get_cmap(palette)
+        for i, cat in enumerate(cats):
+            m = (d[hue_col] == cat).values
+            for row in norm[m]:
+                ax.plot(range(len(cols)), row, alpha=0.6,
+                        color=cmap(i/max(1, len(cats)-1)), label=str(cat) if i < 10 else None)
+        ax.legend(fontsize=8, loc='best')
+    else:
+        for row in norm: ax.plot(range(len(cols)), row, alpha=0.5, color='steelblue')
+    ax.set_xticks(range(len(cols))); ax.set_xticklabels(cols, rotation=30, ha='right')
+    ax.set_ylabel('Normalized value', fontweight='bold'); ax.grid(True, alpha=0.3, axis='y')
+    plt.tight_layout(); return fig
+
+def plot_radar(df, additives, cols):
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 3: return None
+    group_means = df.groupby('Sintering additive')[cols].mean()
+    group_means = group_means.loc[[a for a in additives if a in group_means.index]].dropna(how='all')
+    if len(group_means) < 1: return None
+    norm = (group_means - group_means.min()) / (group_means.max() - group_means.min() + 1e-9)
+    angles = np.linspace(0, 2*np.pi, len(cols), endpoint=False).tolist(); angles += angles[:1]
+    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+    cmap = plt.get_cmap('viridis')
+    for i, (name, row) in enumerate(norm.iterrows()):
+        vals = row.tolist() + [row.iloc[0]]
+        c = cmap(i/max(1, len(norm)-1))
+        ax.plot(angles, vals, label=name, color=c, linewidth=1.5)
+        ax.fill(angles, vals, color=c, alpha=0.15)
+    ax.set_xticks(angles[:-1]); ax.set_xticklabels(cols, fontsize=9)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), fontsize=8)
+    plt.tight_layout(); return fig
+
+def ternary_to_xy(a, b, c):
+    total = a + b + c
+    if total == 0: return 0, 0
+    return 0.5*(2*b + c)/total, (np.sqrt(3)/2)*c/total
+
+def plot_ternary(df, comp_cols, color_col, palette='viridis', log_color=False):
+    comp_cols = [c for c in comp_cols if c in df.columns]
+    if len(comp_cols) != 3: return None
+    d = df[comp_cols + [color_col]].dropna()
+    if len(d) < 2: return None
+    fig, ax = plt.subplots(figsize=(7, 6.5))
+    tri = np.array([[0, 0], [1, 0], [0.5, np.sqrt(3)/2], [0, 0]])
+    ax.plot(tri[:, 0], tri[:, 1], 'k-', linewidth=1.5)
+    xs, ys, cvals = [], [], []
+    for _, row in d.iterrows():
+        a, b, c = row[comp_cols[0]], row[comp_cols[1]], row[comp_cols[2]]
+        tot = a + b + c
+        if tot == 0: continue
+        x, y = ternary_to_xy(a, b, c)
+        xs.append(x); ys.append(y); cvals.append(row[color_col])
+    cvals = np.array(cvals)
+    if log_color: cvals = np.log10(np.clip(cvals, 1e-10, None))
+    sc = ax.scatter(xs, ys, c=cvals, cmap=palette, s=50, edgecolors='black', linewidth=0.5)
+    plt.colorbar(sc, ax=ax).set_label(('log10(' if log_color else '') + color_col + (')' if log_color else ''), fontweight='bold')
+    ax.text(-0.05, -0.05, comp_cols[0], ha='right', fontsize=10, fontweight='bold')
+    ax.text(1.05, -0.05, comp_cols[1], ha='left', fontsize=10, fontweight='bold')
+    ax.text(0.5, np.sqrt(3)/2 + 0.05, comp_cols[2], ha='center', fontsize=10, fontweight='bold')
+    ax.set_xlim(-0.1, 1.1); ax.set_ylim(-0.1, 1.0); ax.set_aspect('equal'); ax.axis('off')
+    plt.tight_layout(); return fig
+
+def plot_correlation_heatmap(corr_df, title):
+    fig, ax = plt.subplots(figsize=(max(6, 0.5*len(corr_df)), max(5, 0.5*len(corr_df))))
+    im = ax.imshow(corr_df.values, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+    ax.set_xticks(range(len(corr_df.columns))); ax.set_xticklabels(corr_df.columns, rotation=45, ha='right', fontsize=9)
+    ax.set_yticks(range(len(corr_df.index))); ax.set_yticklabels(corr_df.index, fontsize=9)
+    for i in range(len(corr_df)):
+        for j in range(len(corr_df.columns)):
+            v = corr_df.values[i, j]
+            if np.isfinite(v):
+                ax.text(j, i, f'{v:.2f}', ha='center', va='center', fontsize=7,
+                        color='white' if abs(v) > 0.5 else 'black')
+    plt.colorbar(im, ax=ax); ax.set_title(title, fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_clustermap(corr_df):
+    if len(corr_df) < 2: return None
+    dist = 1 - corr_df.values
+    try:
+        Z = linkage(dist[np.triu_indices_from(dist, k=1)], method='average')
+        order = leaves_list(Z)
+    except: return None
+    ordered = corr_df.iloc[order, order]
+    fig, ax = plt.subplots(figsize=(max(6, 0.6*len(ordered)), max(5, 0.6*len(ordered))))
+    im = ax.imshow(ordered.values, cmap='coolwarm', vmin=-1, vmax=1)
+    ax.set_xticks(range(len(ordered.columns))); ax.set_xticklabels(ordered.columns, rotation=45, ha='right', fontsize=8)
+    ax.set_yticks(range(len(ordered.index))); ax.set_yticklabels(ordered.index, fontsize=8)
+    plt.colorbar(im, ax=ax); ax.set_title('Hierarchically clustered correlation', fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_pca_biplot(scores, loadings, explained, labels, color_vals=None, palette='viridis'):
+    fig, ax = plt.subplots(figsize=(9, 7))
+    if color_vals is not None:
+        sc = ax.scatter(scores[:, 0], scores[:, 1], c=color_vals, cmap=palette, s=60,
+                        edgecolors='black', alpha=0.8)
+        plt.colorbar(sc, ax=ax, label='Color value')
+    else:
+        ax.scatter(scores[:, 0], scores[:, 1], s=60, c='steelblue', edgecolors='black', alpha=0.8)
+    scale = max(np.abs(scores[:, :2]).max(), 1e-6) * 0.7
+    for i, lab in enumerate(labels):
+        x, y = loadings[i, 0]*scale, loadings[i, 1]*scale
+        ax.arrow(0, 0, x, y, color='red', alpha=0.6, head_width=scale*0.02)
+        ax.text(x*1.1, y*1.1, lab, color='red', fontsize=8, fontweight='bold')
+    ax.set_xlabel(f'PC1 ({explained[0]*100:.1f}%)', fontweight='bold')
+    ax.set_ylabel(f'PC2 ({explained[1]*100:.1f}%)' if len(explained) > 1 else 'PC2', fontweight='bold')
+    ax.grid(True, alpha=0.3); ax.axhline(0, color='gray', lw=0.5); ax.axvline(0, color='gray', lw=0.5)
+    plt.tight_layout(); return fig
+
+def plot_embedding_2d(emb, title, color_vals=None, palette='viridis'):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    if color_vals is not None:
+        sc = ax.scatter(emb[:, 0], emb[:, 1], c=color_vals, cmap=palette, s=50,
+                        edgecolors='black', alpha=0.8)
+        plt.colorbar(sc, ax=ax)
+    else:
+        ax.scatter(emb[:, 0], emb[:, 1], s=50, c='steelblue', edgecolors='black', alpha=0.8)
+    style_axis(ax, f'{title} 1', f'{title} 2'); ax.set_title(title, fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_interaction(df, x_col, y_col, group_col, log_y=False):
+    d = df[[x_col, y_col, group_col]].dropna()
+    if len(d) < 4: return None
+    fig, ax = plt.subplots(figsize=(8, 5))
+    cats = d[group_col].unique(); cmap = plt.get_cmap('viridis')
+    for i, cat in enumerate(cats):
+        sub = d[d[group_col] == cat].sort_values(x_col)
+        if len(sub) < 2: continue
+        c = cmap(i/max(1, len(cats)-1))
+        y_plot = np.log10(np.clip(sub[y_col].values, 1e-10, None)) if log_y else sub[y_col].values
+        ax.plot(sub[x_col], y_plot, 'o-', color=c, alpha=0.7, label=str(cat), markersize=5)
+        try:
+            z = np.polyfit(sub[x_col], y_plot, 1)
+            xx = np.linspace(sub[x_col].min(), sub[x_col].max(), 20)
+            ax.plot(xx, np.polyval(z, xx), '--', color=c, linewidth=1, alpha=0.5)
+        except: pass
+    style_axis(ax, x_col, ('log10(' if log_y else '') + y_col + (')' if log_y else ''))
+    if len(cats) <= 12: ax.legend(fontsize=8, loc='best')
+    plt.tight_layout(); return fig
+
+def plot_forest(effects, labels, cis, title='Effect sizes'):
+    if len(effects) == 0: return None
+    fig, ax = plt.subplots(figsize=(8, max(3, 0.4*len(effects))))
+    y_pos = np.arange(len(effects))
+    for i, (e, ci) in enumerate(zip(effects, cis)):
+        ax.plot([ci[0], ci[1]], [i, i], 'k-', linewidth=1.5)
+        ax.plot(e, i, 'o', color='steelblue', markersize=8, markeredgecolor='black')
+    ax.axvline(0, color='red', linestyle='--', alpha=0.7)
+    ax.set_yticks(y_pos); ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel('Effect (mean difference)', fontweight='bold'); ax.set_title(title, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='x'); plt.tight_layout(); return fig
+
+def plot_pdp_1d(model, X, feature_idx, feature_name, grid_size=20):
+    try:
+        res = partial_dependence(model, X, [feature_idx], grid_resolution=grid_size)
+        grid = res['grid_values'][0]; avg = res['average'][0]
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(grid, avg, 'o-', color='steelblue', linewidth=2, markersize=4)
+        style_axis(ax, feature_name, 'Predicted value'); plt.tight_layout(); return fig
+    except: return None
+
+def plot_pdp_2d(model, X, feat_idx_pair, feat_names, grid_size=20):
+    try:
+        res = partial_dependence(model, X, [feat_idx_pair], grid_resolution=grid_size)
+        grid = res['grid_values']; avg = res['average'][0]
+        fig, ax = plt.subplots(figsize=(8, 6))
+        cf = ax.contourf(grid[0], grid[1], avg, levels=30, cmap='viridis')
+        plt.colorbar(cf, ax=ax, label='Predicted value')
+        style_axis(ax, feat_names[0], feat_names[1])
+        ax.set_title(f'2D PDP: {feat_names[0]} × {feat_names[1]}', fontweight='bold')
+        plt.tight_layout(); return fig
+    except: return None
+
+def plot_ale(feature_values, ale_values, feature_name):
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(feature_values, ale_values, 'o-', color='steelblue', linewidth=2)
+    ax.axhline(0, color='gray', lw=0.5, ls='--')
+    style_axis(ax, feature_name, 'ALE (centered)')
+    plt.tight_layout(); return fig
+
+def plot_friedman_H(pairs, h_vals, title='Friedman H (interaction strength)'):
+    if len(pairs) == 0: return None
+    fig, ax = plt.subplots(figsize=(8, max(3, 0.4*len(pairs))))
+    labels = [' × '.join(p) for p in pairs]
+    ax.barh(labels, h_vals, color='steelblue', edgecolor='black')
+    style_axis(ax, 'H-statistic', 'Feature pair'); ax.set_title(title, fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_curve_clusters(curves, labels, centroids):
+    fig, ax = plt.subplots(figsize=(8, 5))
+    cmap = plt.get_cmap('viridis')
+    unique = np.unique(labels)
+    T = np.array(TEMP_VALUES, dtype=float)
+    for i, cid in enumerate(unique):
+        color = cmap(i/max(1, len(unique)-1))
+        for c in curves[labels == cid]:
+            if np.isfinite(c).sum() >= 3:
+                ax.plot(T[np.isfinite(c)], 10**c[np.isfinite(c)], alpha=0.3, color=color, linewidth=0.8)
+        cen = centroids[i]
+        if np.isfinite(cen).sum() >= 3:
+            ax.plot(T[np.isfinite(cen)], 10**cen[np.isfinite(cen)], color=color, linewidth=2.5,
+                    label=f'Cluster {cid} (n={np.sum(labels==cid)})')
+    ax.set_yscale('log'); style_axis(ax, 'Temperature (°C)', 'Conductivity σ (mS/cm)')
+    ax.legend(fontsize=8); plt.tight_layout(); return fig
+
+def plot_fpca_components(components, explained, T_vals):
+    fig, ax = plt.subplots(figsize=(8, 5))
+    cmap = plt.get_cmap('viridis')
+    for i, comp in enumerate(components[:5]):
+        c = cmap(i/max(1, len(components)-1))
+        ax.plot(T_vals, comp, color=c, lw=2, label=f'FPC {i+1} ({explained[i]*100:.1f}%)')
+    style_axis(ax, 'Temperature (°C)', 'FPC loading'); ax.legend(fontsize=8)
+    ax.set_title('FPCA components of σ(T) curves', fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_segmented_regression(x, y, breakpoint, seg1_params, seg2_params, xlabel, ylabel):
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.scatter(x, y, alpha=0.5, s=30, edgecolor='black')
+    x1 = np.linspace(x.min(), breakpoint, 50); x2 = np.linspace(breakpoint, x.max(), 50)
+    ax.plot(x1, np.polyval(seg1_params, x1), 'r-', lw=2, label='Segment 1')
+    ax.plot(x2, np.polyval(seg2_params, x2), 'b-', lw=2, label='Segment 2')
+    ax.axvline(breakpoint, color='black', ls='--', alpha=0.7, label=f'Breakpoint = {breakpoint:.3f}')
+    style_axis(ax, xlabel, ylabel); ax.legend(fontsize=9)
+    plt.tight_layout(); return fig
+
+def plot_meditation_diagram(total, direct, indirect, a_path, b_path, p_total, p_direct):
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.text(0.1, 0.5, 'Additive\n(X)', ha='center', va='center', bbox=dict(boxstyle='round', fc='lightblue'), fontsize=10)
+    ax.text(0.5, 0.75, 'Density\n(M)', ha='center', va='center', bbox=dict(boxstyle='round', fc='lightgreen'), fontsize=10)
+    ax.text(0.9, 0.5, 'log(σ)\n(Y)', ha='center', va='center', bbox=dict(boxstyle='round', fc='lightyellow'), fontsize=10)
+    ax.annotate('', xy=(0.85, 0.55), xytext=(0.15, 0.55), arrowprops=dict(arrowstyle='->', color='black', lw=1.5))
+    ax.text(0.5, 0.58, f'total = {total:.3f} (p={p_total:.3g})', ha='center', fontsize=9, fontweight='bold')
+    ax.annotate('', xy=(0.47, 0.7), xytext=(0.13, 0.55), arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
+    ax.text(0.25, 0.65, f'a = {a_path:.3f}', color='blue', fontsize=9, fontweight='bold')
+    ax.annotate('', xy=(0.85, 0.58), xytext=(0.53, 0.72), arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
+    ax.text(0.68, 0.7, f'b = {b_path:.3f}', color='blue', fontsize=9, fontweight='bold')
+    ax.text(0.5, 0.42, f'direct = {direct:.3f} (p={p_direct:.3g})\nindirect = {indirect:.3f}',
+            ha='center', fontsize=9, fontweight='bold')
+    ax.set_xlim(0, 1); ax.set_ylim(0.3, 0.9); ax.axis('off')
+    plt.tight_layout(); return fig
+
+def plot_coverage_heatmap(df, col1, col2):
+    d = df[[col1, col2]].dropna()
+    if len(d) < 2: return None
+    fig, ax = plt.subplots(figsize=(7, 5))
+    h = ax.hexbin(d[col1], d[col2], gridsize=15, cmap='viridis', mincnt=1,
+                  edgecolors='black', linewidth=0.3)
+    plt.colorbar(h, ax=ax, label='Count'); style_axis(ax, col1, col2)
+    plt.tight_layout(); return fig
+
+def plot_convex_hull(df, col1, col2):
+    d = df[[col1, col2]].dropna()
+    if len(d) < 3: return None
+    try: hull = ConvexHull(d.values)
+    except: return None
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.scatter(d[col1], d[col2], s=30, alpha=0.6, c='steelblue', edgecolor='black')
+    for simplex in hull.simplices:
+        ax.plot(d.values[simplex, 0], d.values[simplex, 1], 'k-', lw=1)
+    ax.fill(d.values[hull.vertices, 0], d.values[hull.vertices, 1], alpha=0.1, color='green')
+    style_axis(ax, col1, col2); ax.set_title('Convex hull (coverage)', fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_convex_hull_pca(df, cols):
+    if not SKLEARN_OK: return None
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 2: return None
+    d = df[cols].dropna()
+    if len(d) < 4: return None
+    try:
+        X = StandardScaler().fit_transform(d)
+        pca = PCA(n_components=2); scores = pca.fit_transform(X)
+        hull = ConvexHull(scores)
+        fig, ax = plt.subplots(figsize=(7, 5))
+        ax.scatter(scores[:, 0], scores[:, 1], s=30, alpha=0.6, c='steelblue', edgecolor='black')
+        for simplex in hull.simplices:
+            ax.plot(scores[simplex, 0], scores[simplex, 1], 'k-', lw=1)
+        ax.fill(scores[hull.vertices, 0], scores[hull.vertices, 1], alpha=0.1, color='green')
+        style_axis(ax, f'PC1 ({pca.explained_variance_ratio_[0]*100:.1f}%)',
+                   f'PC2 ({pca.explained_variance_ratio_[1]*100:.1f}%)')
+        ax.set_title('Convex hull in PCA space (coverage)', fontweight='bold')
+        plt.tight_layout(); return fig
+    except: return None
+
+def plot_missingness(df):
+    miss = df.isna().astype(int)
+    fig, ax = plt.subplots(figsize=(max(6, 0.3*len(df.columns)), max(3, 0.05*len(df))))
+    ax.imshow(miss.values, aspect='auto', cmap='gray_r', interpolation='nearest')
+    ax.set_xticks(range(len(df.columns))); ax.set_xticklabels(df.columns, rotation=90, fontsize=6)
+    ax.set_yticks(range(0, len(df), max(1, len(df)//20)))
+    ax.set_title('Missingness (black = missing)', fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_sankey(df, source_col, mid_col, target_col, bins=2):
+    d = df[[source_col, mid_col, target_col]].dropna().copy() if all(c in df.columns for c in [source_col, mid_col, target_col]) else None
+    if d is None or len(d) < 3: return None
+    try:
+        d['_target_bin'] = pd.qcut(d[target_col], q=bins, labels=[f'Low {target_col}', f'High {target_col}'], duplicates='drop')
+    except: return None
+    if d['_target_bin'].isna().all(): return None
+    labels = list(pd.unique(d[source_col].astype(str)))
+    for v in pd.unique(d[mid_col].astype(str)):
+        if v not in labels: labels.append(v)
+    for v in pd.unique(d['_target_bin'].astype(str)):
+        if v not in labels: labels.append(v)
+    idx = {v: i for i, v in enumerate(labels)}
+    links = []
+    for _, row in d.iterrows():
+        links.append((idx[str(row[source_col])], idx[str(row[mid_col])]))
+        links.append((idx[str(row[mid_col])], idx[str(row['_target_bin'])]))
+    cnt = Counter(links)
+    src, tgt, val = zip(*[(s, t, v) for (s, t), v in cnt.items()])
+    if PLOTLY_OK:
+        try:
+            fig = go.Figure(data=[go.Sankey(
+                node=dict(pad=15, thickness=20, line=dict(color='black', width=0.5), label=labels),
+                link=dict(source=src, target=tgt, value=val))])
+            fig.update_layout(title='Sankey flow', font=dict(size=10))
+            return fig
+        except: pass
+    # fallback to matplotlib-only Sankey
+    try:
+        from matplotlib.sankey import Sankey
+        fig, ax = plt.subplots(figsize=(10, 5))
+        n_layers = 3
+        for lyr, name in enumerate([source_col, mid_col, '_target_bin']):
+            unique_vals = list(pd.unique(d[name].astype(str)))
+            for j, v in enumerate(unique_vals):
+                y = (j + 1) / (len(unique_vals) + 1)
+                ax.text(lyr / (n_layers - 1), y, v, ha='center', va='center',
+                        bbox=dict(boxstyle='round', fc='lightblue'), fontsize=8)
+        for _, row in d.iterrows():
+            try:
+                y_src = (list(pd.unique(d[source_col].astype(str))).index(str(row[source_col])) + 1) / (len(pd.unique(d[source_col])) + 1)
+                y_mid = (list(pd.unique(d[mid_col].astype(str))).index(str(row[mid_col])) + 1) / (len(pd.unique(d[mid_col])) + 1)
+                y_tgt = (list(pd.unique(d['_target_bin'].astype(str))).index(str(row['_target_bin'])) + 1) / (len(pd.unique(d['_target_bin'])) + 1)
+                ax.plot([0, 0.5], [y_src, y_mid], alpha=0.15, color='gray')
+                ax.plot([0.5, 1], [y_mid, y_tgt], alpha=0.15, color='gray')
+            except: pass
+        ax.set_xlim(-0.1, 1.1); ax.set_ylim(0, 1); ax.axis('off')
+        ax.set_title('Sankey flow (fallback)', fontweight='bold')
+        plt.tight_layout(); return fig
+    except: return None
+
+def plot_gam_fit(X, y, gam_model, feature_idx, feature_name):
+    try:
+        grid = np.linspace(X[:, feature_idx].min(), X[:, feature_idx].max(), 100)
+        X_dummy = np.tile(X.mean(axis=0), (100, 1)); X_dummy[:, feature_idx] = grid
+        y_pred = gam_model.predict(X_dummy)
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.scatter(X[:, feature_idx], y, alpha=0.4, s=20, c='gray')
+        ax.plot(grid, y_pred, 'r-', lw=2)
+        style_axis(ax, feature_name, 'Predicted value'); ax.set_title(f'GAM partial effect: {feature_name}', fontweight='bold')
+        plt.tight_layout(); return fig
+    except: return None
+
+def plot_cca_scores(x_scores, y_scores):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(x_scores[:, 0], y_scores[:, 0], s=40, edgecolors='black', alpha=0.7, c='steelblue')
+    try:
+        r, _ = stats.pearsonr(x_scores[:, 0], y_scores[:, 0])
+        z = np.polyfit(x_scores[:, 0], y_scores[:, 0], 1)
+        xx = np.linspace(x_scores[:, 0].min(), x_scores[:, 0].max(), 20)
+        ax.plot(xx, np.polyval(z, xx), 'r--', lw=1.5, label=f'r = {r:.3f}')
+    except: pass
+    style_axis(ax, 'CCA X-score 1', 'CCA Y-score 1'); ax.legend(); ax.set_title('CCA canonical scores', fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_dunn_posthoc(group_labels, z_values, p_values):
+    fig, ax = plt.subplots(figsize=(8, max(3, 0.4*len(group_labels))))
+    colors = ['red' if p < 0.05 else 'gray' for p in p_values]
+    ax.barh(group_labels, z_values, color=colors, edgecolor='black')
+    ax.axvline(0, color='black', lw=0.5)
+    style_axis(ax, 'z-statistic', 'Pair'); ax.set_title('Dunn post-hoc (red = p < 0.05)', fontweight='bold')
+    plt.tight_layout(); return fig
+
+def plot_meta_forest(df_effects, df_ci, labels, title='Meta-forest by Reference'):
+    if len(df_effects) == 0: return None
+    fig, ax = plt.subplots(figsize=(8, max(3, 0.4*len(df_effects))))
+    for i, (e, ci) in enumerate(zip(df_effects, df_ci)):
+        ax.plot([ci[0], ci[1]], [i, i], 'k-', linewidth=1.5)
+        ax.plot(e, i, 'o', color='steelblue', markersize=8, markeredgecolor='black')
+    ax.axvline(0, color='red', linestyle='--', alpha=0.7)
+    ax.set_yticks(range(len(df_effects))); ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel('Effect (mean ΔEa)', fontweight='bold'); ax.set_title(title, fontweight='bold')
+    ax.grid(True, alpha=0.3, axis='x'); plt.tight_layout(); return fig
+
+def plot_bootstrap_coefs(coefs_samples, coef_names):
+    fig, ax = plt.subplots(figsize=(8, max(3, 0.4*len(coef_names))))
+    for i, (name, vals) in enumerate(zip(coef_names, coefs_samples.T)):
+        ax.boxplot([vals], positions=[i], vert=False, widths=0.6, patch_artist=True)
+    ax.set_yticks(range(len(coef_names))); ax.set_yticklabels(coef_names)
+    ax.axvline(0, color='red', ls='--', alpha=0.7)
+    style_axis(ax, 'Coefficient (bootstrap distribution)', 'Feature')
+    ax.set_title('Bootstrap CI of coefficients', fontweight='bold')
+    plt.tight_layout(); return fig
 
 # ============================================
-# MAIN APPLICATION FUNCTION
+# ANALYSIS FUNCTIONS
+# ============================================
+
+def run_anova(df, y_col, group_col):
+    d = df[[y_col, group_col]].dropna()
+    if len(d) < 4: return None
+    groups = [g[y_col].values for _, g in d.groupby(group_col) if len(g) > 0]
+    if len(groups) < 2: return None
+    try:
+        f, p = stats.f_oneway(*groups)
+        all_v = np.concatenate(groups); gm = np.mean(all_v)
+        ss_b = sum(len(g) * (np.mean(g) - gm)**2 for g in groups)
+        ss_t = np.sum((all_v - gm)**2)
+        eta = ss_b / ss_t if ss_t > 0 else 0
+        return {'F': f, 'p': p, 'eta_squared': eta, 'n_groups': len(groups), 'n_total': len(all_v)}
+    except: return None
+
+def run_kruskal(df, y_col, group_col):
+    d = df[[y_col, group_col]].dropna()
+    if len(d) < 4: return None
+    groups = [g[y_col].values for _, g in d.groupby(group_col) if len(g) > 0]
+    if len(groups) < 2: return None
+    try:
+        h, p = stats.kruskal(*groups)
+        return {'H': h, 'p': p, 'n_groups': len(groups), 'n_total': len(d)}
+    except: return None
+
+def run_dunn_posthoc(df, y_col, group_col):
+    d = df[[y_col, group_col]].dropna()
+    if len(d) < 6: return None
+    groups = list(d.groupby(group_col))
+    if len(groups) < 2: return None
+    try:
+        from scipy.stats import rankdata
+        ranks = rankdata(d[y_col].values)
+        d = d.copy(); d['_rank'] = ranks
+        n = len(d)
+        # pairwise
+        pairs, zvals, pvals = [], [], []
+        cats = [g for g, _ in groups]
+        for i in range(len(cats)):
+            for j in range(i + 1, len(cats)):
+                gi = d[d[group_col] == cats[i]]['_rank'].values
+                gj = d[d[group_col] == cats[j]]['_rank'].values
+                if len(gi) < 1 or len(gj) < 1: continue
+                ri = np.mean(gi); rj = np.mean(gj)
+                ni = len(gi); nj = len(gj)
+                sigma2 = (n * (n + 1)) / 12.0
+                denom = np.sqrt(sigma2 * (1/ni + 1/nj))
+                z = (ri - rj) / denom if denom > 0 else 0
+                p = 2 * (1 - stats.norm.cdf(abs(z)))
+                pairs.append(f'{cats[i]} vs {cats[j]}'); zvals.append(z); pvals.append(p)
+        # Bonferroni
+        pvals_adj = [min(p * len(pvals), 1.0) for p in pvals]
+        return pd.DataFrame({'pair': pairs, 'z': zvals, 'p_raw': pvals, 'p_adj': pvals_adj})
+    except: return None
+
+def run_tukey(df, y_col, group_col):
+    if not STATSMODELS_OK: return None
+    d = df[[y_col, group_col]].dropna()
+    if len(d) < 6: return None
+    try:
+        res = pairwise_tukeyhsd(d[y_col].values, d[group_col].values, alpha=0.05)
+        return res
+    except: return None
+
+def run_pairwise_comparisons(df, y_col, group_col, reference_group='Pure'):
+    d = df[[y_col, group_col]].dropna()
+    if reference_group not in d[group_col].values: return None
+    ref = d[d[group_col] == reference_group][y_col].values
+    results = []
+    for cat in d[group_col].unique():
+        if cat == reference_group: continue
+        other = d[d[group_col] == cat][y_col].values
+        if len(other) < 2 or len(ref) < 2: continue
+        try:
+            _, p = stats.mannwhitneyu(ref, other, alternative='two-sided')
+            diff = np.mean(other) - np.mean(ref)
+            se = np.sqrt(np.var(ref)/len(ref) + np.var(other)/len(other))
+            ci = (diff - 1.96*se, diff + 1.96*se)
+            d_cohen = diff / np.sqrt((np.var(ref) + np.var(other))/2) if (np.var(ref) + np.var(other)) > 0 else np.nan
+            results.append({'group': cat, 'n': len(other), 'mean': np.mean(other),
+                           'diff': diff, 'ci_low': ci[0], 'ci_high': ci[1],
+                           'p': p, 'cohen_d': d_cohen})
+        except: continue
+    return pd.DataFrame(results) if results else None
+
+def run_mixed_effects(df, y_col, fixed_cols, group_col='References'):
+    if not STATSMODELS_OK: return None
+    cols = [y_col] + fixed_cols + [group_col]
+    d = df[cols].dropna()
+    if len(d) < 10: return None
+    try:
+        formula = f'Q("{y_col}") ~ ' + ' + '.join([f'Q("{c}")' for c in fixed_cols])
+        model = smf.mixedlm(formula, data=d, groups=d[group_col])
+        return model.fit(disp=False)
+    except: return None
+
+def run_partial_correlation(df, x_col, y_col, control_cols):
+    cols = [x_col, y_col] + control_cols
+    d = df[cols].dropna()
+    if len(d) < len(cols) + 3: return None
+    try:
+        if not SKLEARN_OK: return None
+        Z = StandardScaler().fit_transform(d[control_cols])
+        X = d[[x_col, y_col]].values
+        Z_with_int = np.column_stack([np.ones(len(Z)), Z])
+        beta = np.linalg.lstsq(Z_with_int, X, rcond=None)[0]
+        resid = X - Z_with_int @ beta
+        r, p = stats.pearsonr(resid[:, 0], resid[:, 1])
+        return {'partial_r': r, 'p': p, 'n': len(d)}
+    except: return None
+
+def run_distance_correlation(df, x_col, y_col):
+    d = df[[x_col, y_col]].dropna()
+    if len(d) < 5: return None
+    try:
+        if DCOR_OK:
+            val = dcor.distance_correlation(d[x_col].values, d[y_col].values)
+            return {'dcor': float(val), 'n': len(d)}
+        else:
+            x = d[x_col].values; y = d[y_col].values
+            a = np.abs(x[:, None] - x[None, :])
+            b = np.abs(y[:, None] - y[None, :])
+            A = a - a.mean(axis=0) - a.mean(axis=1)[:, None] + a.mean()
+            B = b - b.mean(axis=0) - b.mean(axis=1)[:, None] + b.mean()
+            dcov2 = np.mean(A * B)
+            dvar_x = np.mean(A * A); dvar_y = np.mean(B * B)
+            dcor_val = np.sqrt(max(dcov2, 0) / np.sqrt(max(dvar_x * dvar_y, 1e-12)))
+            return {'dcor': float(dcor_val), 'n': len(d)}
+    except: return None
+
+def run_pca(df, cols):
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 2 or not SKLEARN_OK: return None
+    d = df[cols].dropna()
+    if len(d) < 3: return None
+    X = StandardScaler().fit_transform(d)
+    pca = PCA(n_components=min(5, len(cols), len(d)-1))
+    scores = pca.fit_transform(X)
+    return {'scores': scores, 'loadings': pca.components_.T,
+            'explained': pca.explained_variance_ratio_,
+            'n': len(d), 'cols': cols, 'index': d.index}
+
+def run_famd(df, num_cols, cat_cols):
+    num_cols = [c for c in num_cols if c in df.columns]
+    cat_cols = [c for c in cat_cols if c in df.columns]
+    cols = num_cols + cat_cols
+    if len(cols) < 2: return None
+    d = df[cols].dropna()
+    if len(d) < 3: return None
+    if PRINCE_OK and len(cat_cols) > 0:
+        try:
+            famd = prince.FAMD(n_components=min(5, len(cols)), random_state=42)
+            scores = famd.fit_transform(d).values
+            return {'scores': scores, 'explained': np.array(famd.explained_inertia_),
+                    'n': len(d), 'cols': cols, 'index': d.index, 'method': 'prince.FAMD'}
+        except: pass
+    try:
+        if not SKLEARN_OK: return None
+        X_num = StandardScaler().fit_transform(d[num_cols]) if num_cols else np.zeros((len(d), 0))
+        if cat_cols:
+            enc = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+            X_cat = enc.fit_transform(d[cat_cols])
+        else:
+            X_cat = np.zeros((len(d), 0))
+        X = np.hstack([X_num, X_cat])
+        pca = PCA(n_components=min(5, X.shape[1], len(d)-1))
+        scores = pca.fit_transform(X)
+        return {'scores': scores, 'loadings': pca.components_[:2].T if pca.components_.shape[0] >= 2 else pca.components_.T,
+                'explained': pca.explained_variance_ratio_,
+                'n': len(d), 'cols': num_cols + [f'cat_{c}' for c in cat_cols],
+                'index': d.index, 'method': 'PCA (fallback)'}
+    except: return None
+
+def run_umap(df, cols, n_neighbors=15):
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 2 or not UMAP_OK or not SKLEARN_OK: return None
+    d = df[cols].dropna()
+    if len(d) < 10: return None
+    try:
+        X = StandardScaler().fit_transform(d)
+        reducer = UMAP(n_neighbors=min(n_neighbors, len(d)-1), n_components=2, random_state=42)
+        emb = reducer.fit_transform(X)
+        return {'embedding': emb, 'index': d.index, 'n': len(d)}
+    except: return None
+
+def run_tsne(df, cols, perplexity=15):
+    cols = [c for c in cols if c in df.columns]
+    if len(cols) < 2 or not SKLEARN_OK: return None
+    d = df[cols].dropna()
+    if len(d) < 5: return None
+    try:
+        X = StandardScaler().fit_transform(d)
+        tsne = TSNE(n_components=2, perplexity=min(perplexity, len(d)-1), random_state=42, init='pca', learning_rate='auto')
+        emb = tsne.fit_transform(X)
+        return {'embedding': emb, 'index': d.index, 'n': len(d)}
+    except: return None
+
+def run_elastic_net(df, target_col, feature_cols, alpha_cv=5):
+    if not SKLEARN_OK: return None
+    cols = [c for c in feature_cols if c in df.columns]
+    d = df[cols + [target_col]].dropna()
+    if len(d) < max(10, 3*len(cols)): return None
+    X = StandardScaler().fit_transform(d[cols]); y = d[target_col].values
+    try:
+        model = ElasticNetCV(cv=min(alpha_cv, len(d)), l1_ratio=[0.1, 0.5, 0.9, 1.0], max_iter=10000)
+        model.fit(X, y)
+        return {'model': model, 'cols': cols, 'coefs': model.coef_, 'intercept': model.intercept_,
+                'alpha': model.alpha_, 'l1_ratio': model.l1_ratio_, 'X': X, 'y': y, 'n': len(d), 'index': d.index}
+    except: return None
+
+def bootstrap_en_coefs(df, target_col, feature_cols, n_bootstrap=500, seed=42):
+    if not SKLEARN_OK: return None
+    cols = [c for c in feature_cols if c in df.columns]
+    d = df[cols + [target_col]].dropna()
+    if len(d) < max(10, 3*len(cols)): return None
+    rng = np.random.default_rng(seed)
+    coefs_samples = []
+    for _ in range(n_bootstrap):
+        idx = rng.choice(len(d), len(d), replace=True)
+        X_b = StandardScaler().fit_transform(d[cols].values[idx])
+        y_b = d[target_col].values[idx]
+        try:
+            m = ElasticNetCV(cv=3, l1_ratio=[0.5, 0.9, 1.0], max_iter=5000)
+            m.fit(X_b, y_b)
+            coefs_samples.append(m.coef_)
+        except: continue
+    if len(coefs_samples) < 10: return None
+    coefs_arr = np.array(coefs_samples)
+    return {'samples': coefs_arr, 'mean': coefs_arr.mean(axis=0),
+            'ci_lower': np.percentile(coefs_arr, 2.5, axis=0),
+            'ci_upper': np.percentile(coefs_arr, 97.5, axis=0),
+            'cols': cols}
+
+def run_gam(df, target_col, feature_cols):
+    if not PYGAM_OK or not SKLEARN_OK: return None
+    cols = [c for c in feature_cols if c in df.columns]
+    d = df[cols + [target_col]].dropna()
+    if len(d) < 20: return None
+    try:
+        X = StandardScaler().fit_transform(d[cols]); y = d[target_col].values
+        terms = gam_s(0)
+        for i in range(1, len(cols)): terms = terms + gam_s(i)
+        gam = LinearGAM(terms).gridsearch(X, y)
+        return {'model': gam, 'cols': cols, 'X': X, 'y': y, 'n': len(d)}
+    except: return None
+
+def run_gam_statsmodels(df, target_col, feature_cols):
+    if not STATSMODELS_OK: return None
+    cols = [c for c in feature_cols if c in df.columns]
+    d = df[cols + [target_col]].dropna()
+    if len(d) < 20: return None
+    try:
+        from statsmodels.gam.api import GLMGam, BSplines
+        X = d[cols].values; y = d[target_col].values
+        bs = BSplines(X, df=[5]*len(cols), degree=[3]*len(cols))
+        gam = GLMGam(y, exog=np.ones((len(X), 1)), smoother=bs).fit()
+        return {'model': gam, 'cols': cols, 'X': X, 'y': y, 'n': len(d), 'smoother': bs}
+    except: return None
+
+def run_cca(df, x_cols, y_cols):
+    if not SKLEARN_OK: return None
+    x_cols = [c for c in x_cols if c in df.columns]
+    y_cols = [c for c in y_cols if c in df.columns]
+    if len(x_cols) < 2 or len(y_cols) < 2: return None
+    d = df[x_cols + y_cols].dropna()
+    if len(d) < 6: return None
+    try:
+        X = StandardScaler().fit_transform(d[x_cols]); Y = StandardScaler().fit_transform(d[y_cols])
+        cca = CCA(n_components=min(2, len(x_cols), len(y_cols)))
+        x_s, y_s = cca.fit_transform(X, Y)
+        return {'x_scores': x_s, 'y_scores': y_s, 'x_cols': x_cols, 'y_cols': y_cols, 'n': len(d)}
+    except: return None
+
+def run_permutation_importance(model, X, y, feature_names, n_repeats=10):
+    if not SKLEARN_OK: return None
+    try:
+        res = permutation_importance(model, X, y, n_repeats=n_repeats, random_state=42)
+        return pd.DataFrame({'feature': feature_names, 'importance': res.importances_mean,
+                             'std': res.importances_std}).sort_values('importance', ascending=False)
+    except: return None
+
+def run_shap_linear(model, X, feature_names):
+    if SHAP_OK:
+        try:
+            explainer = shap.LinearExplainer(model, X)
+            vals = explainer.shap_values(X)
+            return {'shap_values': vals, 'features': feature_names, 'method': 'shap'}
+        except: pass
+    coefs = model.coef_ if hasattr(model, 'coef_') else None
+    if coefs is not None:
+        X_centered = X - X.mean(axis=0)
+        vals = X_centered * coefs
+        return {'shap_values': vals, 'features': feature_names, 'method': 'linear_approx'}
+    return None
+
+def run_pls(df, target_col, feature_cols):
+    if not SKLEARN_OK: return None
+    cols = [c for c in feature_cols if c in df.columns]
+    d = df[cols + [target_col]].dropna()
+    if len(d) < 5: return None
+    try:
+        X = StandardScaler().fit_transform(d[cols]); y = d[target_col].values
+        pls = PLSRegression(n_components=min(3, len(cols)))
+        pls.fit(X, y)
+        vip = np.sqrt((pls.x_weights_**2 * pls.x_scores_.var(axis=0)).sum(axis=1))
+        return {'model': pls, 'cols': cols, 'vip': vip, 'n': len(d), 'X': X, 'y': y}
+    except: return None
+
+def compute_ale(model, X, feature_idx, n_bins=20):
+    try:
+        x = X[:, feature_idx]
+        qs = np.quantile(x, np.linspace(0, 1, n_bins + 1))
+        qs = np.unique(qs)
+        if len(qs) < 3: return None
+        ale_vals = [0.0]
+        for i in range(len(qs) - 1):
+            lo, hi = qs[i], qs[i+1]
+            mask = (x >= lo) & (x <= hi)
+            if mask.sum() == 0: ale_vals.append(ale_vals[-1]); continue
+            X_lo = X[mask].copy(); X_hi = X[mask].copy()
+            X_lo[:, feature_idx] = lo; X_hi[:, feature_idx] = hi
+            diff = np.mean(model.predict(X_hi) - model.predict(X_lo))
+            ale_vals.append(ale_vals[-1] + diff)
+        ale_vals = np.array(ale_vals)
+        ale_vals = ale_vals - ale_vals.mean()
+        centers = (qs[:-1] + qs[1:]) / 2 if len(qs) - 1 == len(ale_vals) else np.linspace(qs[0], qs[-1], len(ale_vals))
+        return {'grid': centers, 'ale': ale_vals}
+    except: return None
+
+def compute_ale_2d(model, X, feature_idx_pair, n_bins=15):
+    try:
+        i, j = feature_idx_pair
+        xi = np.quantile(X[:, i], np.linspace(0, 1, n_bins + 1))
+        yi = np.quantile(X[:, j], np.linspace(0, 1, n_bins + 1))
+        ale_grid = np.zeros((n_bins, n_bins))
+        for a in range(n_bins):
+            for b in range(n_bins):
+                lo_i, hi_i = xi[a], xi[a+1]
+                lo_j, hi_j = yi[b], yi[b+1]
+                mask = (X[:, i] >= lo_i) & (X[:, i] <= hi_i) & (X[:, j] >= lo_j) & (X[:, j] <= hi_j)
+                if mask.sum() == 0: continue
+                X_lo = X[mask].copy(); X_hi = X[mask].copy()
+                X_lo[:, i] = lo_i; X_lo[:, j] = lo_j
+                X_hi[:, i] = hi_i; X_hi[:, j] = hi_j
+                try:
+                    ale_grid[b, a] = np.mean(model.predict(X_hi) - model.predict(X_lo))
+                except: pass
+        ale_grid = ale_grid - np.mean(ale_grid)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        cf = ax.contourf((xi[:-1] + xi[1:]) / 2, (yi[:-1] + yi[1:]) / 2, ale_grid, levels=30, cmap='RdBu_r')
+        plt.colorbar(cf, ax=ax, label='ALE (centered)')
+        style_axis(ax, f'Feature {i}', f'Feature {j}')
+        ax.set_title(f'2D ALE: {i} × {j}', fontweight='bold')
+        plt.tight_layout(); return fig
+    except: return None
+
+def compute_friedman_H(model, X, feat_idx_pair, grid_size=15):
+    try:
+        res = partial_dependence(model, X, [feat_idx_pair], grid_resolution=grid_size)
+        pd_vals = res['average'][0]
+        # canonical H: sqrt(sum((PD - row_mean - col_mean + grand_mean)^2) / sum(PD^2))
+        pd_c = pd_vals - pd_vals.mean()
+        denom = np.sum(pd_vals**2)
+        if denom <= 0: return 0.0
+        return float(np.sqrt(np.sum(pd_c**2) / denom))
+    except: return None
+
+def run_sobol(df, target_col, feature_cols, n_samples=512):
+    cols = [c for c in feature_cols if c in df.columns]
+    d = df[cols + [target_col]].dropna()
+    if len(d) < 20: return None
+    if SALIB_OK and SKLEARN_OK:
+        try:
+            problem = {'num_vars': len(cols),
+                       'names': cols,
+                       'bounds': [[float(d[c].min()), float(d[c].max())] for c in cols]}
+            X_s = sobol_saltelli(problem, n_samples, calc_second_order=False)
+            model = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=3)
+            model.fit(d[cols].values, d[target_col].values)
+            Y_s = model.predict(X_s)
+            Si = sobol_analyze.analyze(problem, Y_s, print_to_console=False)
+            return {'df': pd.DataFrame({'Variable': cols, 'S1': Si['S1'], 'ST': Si['ST'],
+                                        'S1_conf': Si['S1_conf'], 'ST_conf': Si['ST_conf']}).sort_values('ST', ascending=False),
+                    'method': 'SALib (Sobol)'}
+        except: pass
+    # canonical fallback: variance-based first-order via binning
+    try:
+        if not SKLEARN_OK: return None
+        model = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=3)
+        X = d[cols].values; y = d[target_col].values
+        model.fit(X, y)
+        y_pred = model.predict(X)
+        total_var = np.var(y_pred)
+        res = []
+        for i, c in enumerate(cols):
+            n_bins = min(10, len(np.unique(X[:, i])))
+            if n_bins < 3:
+                res.append({'Variable': c, 'S1_approx': 0.0, 'ST_approx': 0.0}); continue
+            try:
+                bins = pd.qcut(X[:, i], q=n_bins, labels=False, duplicates='drop')
+            except: 
+                res.append({'Variable': c, 'S1_approx': 0.0, 'ST_approx': 0.0}); continue
+            # first-order: var(E[y|x])
+            cond_means = []
+            for b in range(int(bins.max()) + 1):
+                mask = bins == b
+                if mask.sum() > 0: cond_means.append(np.mean(y_pred[mask]))
+            s1 = np.var(cond_means) / total_var if total_var > 0 else 0
+            # total-order: via permutation of feature values
+            X_perm = X.copy(); X_perm[:, i] = np.random.permutation(X_perm[:, i])
+            y_perm = model.predict(X_perm)
+            st_val = (total_var - np.var(y_perm)) / total_var if total_var > 0 else 0
+            res.append({'Variable': c, 'S1_approx': max(0, s1), 'ST_approx': max(0, st_val)})
+        return {'df': pd.DataFrame(res).sort_values('ST_approx', ascending=False),
+                'method': 'Variance decomposition (binning + permutation)'}
+    except: return None
+
+def run_curve_clustering(df, n_clusters=3):
+    curves = df[TEMP_COLS].values.astype(float)
+    valid = np.array([np.isfinite(c).sum() >= 3 and np.all(np.where(np.isfinite(c), c > 0, True)) for c in curves])
+    if valid.sum() < n_clusters: return None
+    vc = curves[valid]
+    log_curves = np.log10(np.clip(vc, 1e-10, None))
+    filled = np.array([np.interp(TEMP_VALUES, np.array(TEMP_VALUES)[np.isfinite(c)], c[np.isfinite(c)]) for c in log_curves])
+    try:
+        km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        labels = km.fit_predict(filled)
+        return {'labels': labels, 'centroids': km.cluster_centers_, 'curves': filled,
+                'valid_mask': valid, 'valid_index': df.index[valid]}
+    except: return None
+
+def run_fpca(df, n_components=3):
+    curves = df[TEMP_COLS].values.astype(float)
+    valid = np.array([np.isfinite(c).sum() >= 3 and np.all(np.where(np.isfinite(c), c > 0, True)) for c in curves])
+    if valid.sum() < max(n_components + 2, 5): return None
+    vc = curves[valid]
+    log_curves = np.log10(np.clip(vc, 1e-10, None))
+    filled = np.array([np.interp(TEMP_VALUES, np.array(TEMP_VALUES)[np.isfinite(c)], c[np.isfinite(c)]) for c in log_curves])
+    if SKFDA_OK:
+        try:
+            fd = FDataGrid(filled, grid_points=TEMP_VALUES)
+            fpca = skfda_FPCA(n_components=n_components)
+            fpca.fit(fd)
+            scores = fpca.transform(fd)
+            comps = np.array([fpca.components_.data_matrix[i, 0, :] for i in range(n_components)])
+            return {'scores': scores, 'components': comps,
+                    'explained': fpca.explained_variance_ratio_, 'n': valid.sum(),
+                    'valid_index': df.index[valid], 'T_vals': np.array(TEMP_VALUES),
+                    'method': 'scikit-fda FPCA'}
+        except: pass
+    # canonical fallback: PCA on B-spline smoothed curves
+    try:
+        if not SKLEARN_OK: return None
+        from scipy.interpolate import splrep, splev
+        smoothed = []
+        for c in filled:
+            try:
+                tck = splrep(TEMP_VALUES, c, k=3, s=0.01)
+                smoothed.append(splev(TEMP_VALUES, tck))
+            except:
+                smoothed.append(c)
+        smoothed = np.array(smoothed)
+        X = StandardScaler().fit_transform(smoothed)
+        pca = PCA(n_components=min(n_components, smoothed.shape[1], smoothed.shape[0]-1))
+        scores = pca.fit_transform(X)
+        return {'scores': scores, 'components': pca.components_,
+                'explained': pca.explained_variance_ratio_, 'n': valid.sum(),
+                'valid_index': df.index[valid], 'T_vals': np.array(TEMP_VALUES),
+                'method': 'Spline-PCA (fallback)'}
+    except: return None
+
+def run_segmented_regression(x, y, n_segments=2):
+    if len(x) < n_segments + 2: return None
+    if PWLE_OK:
+        try:
+            model = pwlf.PiecewiseLinFit(x, y)
+            breaks = model.fit(n_segments)
+            return {'breakpoints': breaks[1:-1], 'model': model,
+                    'n_segments': n_segments, 'method': 'pwlf'}
+        except: pass
+    # canonical fallback: exhaustive grid-search over breakpoints with continuous optimization
+    try:
+        sorted_idx = np.argsort(x)
+        xs, ys = x[sorted_idx], y[sorted_idx]
+        best_bp, best_sse = None, np.inf
+        for bp_idx in range(3, len(xs) - 3):
+            x1, y1 = xs[:bp_idx], ys[:bp_idx]
+            x2, y2 = xs[bp_idx:], ys[bp_idx:]
+            try:
+                p1 = np.polyfit(x1, y1, 1); p2 = np.polyfit(x2, y2, 1)
+                sse = np.sum((y1 - np.polyval(p1, x1))**2) + np.sum((y2 - np.polyval(p2, x2))**2)
+                if sse < best_sse: best_sse = sse; best_bp = xs[bp_idx]; best_p1 = p1; best_p2 = p2
+            except: continue
+        if best_bp is not None:
+            return {'breakpoints': np.array([best_bp]), 'seg1_params': best_p1, 'seg2_params': best_p2, 'method': 'grid-search'}
+        return None
+    except: return None
+
+def run_segmented_regression_batch(df, n_segments=2):
+    results = []
+    for idx, row in df.iterrows():
+        vals = np.array([row.get(c, np.nan) for c in TEMP_COLS], dtype=float)
+        T = np.array(TEMP_VALUES)
+        mask = np.isfinite(vals) & (vals > 0)
+        if mask.sum() < 4: continue
+        x = 1000 / (T[mask] + 273.15)
+        y = np.log(vals[mask] * (T[mask] + 273.15))
+        res = run_segmented_regression(x, y, n_segments)
+        if res and 'breakpoints' in res:
+            results.append({'index': idx, 'breakpoint_1000T': res['breakpoints'][0],
+                            'T_C': 1000 / res['breakpoints'][0] - 273.15 if res['breakpoints'][0] > 0 else np.nan})
+    return pd.DataFrame(results) if results else None
+
+def run_mediation(df, treatment_col, mediator_col, outcome_col):
+    d = df[[treatment_col, mediator_col, outcome_col]].dropna()
+    if len(d) < 10: return None
+    X = d[treatment_col].values.astype(float); M = d[mediator_col].values.astype(float); Y = d[outcome_col].values.astype(float)
+    try:
+        a_coef, _, _, _, _ = stats.linregress(X, M)
+        c_coef, _, _, c_p, _ = stats.linregress(X, Y)
+        X_design = np.column_stack([np.ones_like(X), X, M])
+        coef, _, _, _ = np.linalg.lstsq(X_design, Y, rcond=None)
+        c_prime = coef[1]; b = coef[2]
+        y_pred = X_design @ coef; resid = Y - y_pred
+        dof = len(Y) - 3
+        sse = np.sum(resid**2)
+        cov = sse / dof * np.linalg.inv(X_design.T @ X_design)
+        se = np.sqrt(np.diag(cov))
+        t_stat = c_prime / se[1] if se[1] > 0 else 0
+        p_direct = 2 * (1 - stats.t.cdf(abs(t_stat), dof))
+        indirect = a_coef * b
+        return {'total': c_coef, 'direct': c_prime, 'indirect': indirect,
+                'a_path': a_coef, 'b_path': b, 'p_total': c_p, 'p_direct': p_direct, 'n': len(d)}
+    except: return None
+
+def match_pairs_by(df, ref_col, treatment_col='is_additive', match_on=('ρ, %', 'T sin')):
+    rows = []
+    for ref, g in df.groupby(ref_col):
+        if 'Sintering additive' not in g.columns: continue
+        pure = g[g['Sintering additive'] == 'Pure']
+        additive = g[g['Sintering additive'] != 'Pure']
+        if len(pure) == 0 or len(additive) == 0: continue
+        for _, a in additive.iterrows():
+            best, best_d = None, np.inf
+            for _, p in pure.iterrows():
+                dist = 0
+                for col in match_on:
+                    if col in df.columns and pd.notna(a.get(col)) and pd.notna(p.get(col)):
+                        dist += abs(a[col] - p[col]) / (np.nanstd(df[col]) + 1e-9)
+                if dist < best_d: best_d = dist; best = p
+            if best is not None:
+                rows.append({'Reference': ref, 'Additive': a.get('Sintering additive'),
+                             'ref_idx': best.name, 'add_idx': a.name, 'match_dist': best_d})
+    return pd.DataFrame(rows) if rows else None
+
+def run_cem_matching(df, ref_col, match_on=('ρ, %', 'T sin'), n_bins=5):
+    """Canonical Coarsened Exact Matching with quantile binning."""
+    if 'Sintering additive' not in df.columns: return None
+    rows = []
+    for ref, g in df.groupby(ref_col):
+        pure = g[g['Sintering additive'] == 'Pure']
+        additive = g[g['Sintering additive'] != 'Pure']
+        if len(pure) == 0 or len(additive) == 0: continue
+        # create coarse bins per variable
+        bin_edges = {}
+        for col in match_on:
+            if col not in df.columns: continue
+            vals = g[col].dropna()
+            if len(vals) < 2: continue
+            try:
+                qs = np.quantile(vals, np.linspace(0, 1, n_bins + 1))
+                qs = np.unique(qs)
+                bin_edges[col] = qs
+            except: continue
+        if not bin_edges: continue
+        def get_bins(row):
+            key = []
+            for col, edges in bin_edges.items():
+                v = row.get(col, np.nan)
+                if pd.isna(v): return None
+                b = np.searchsorted(edges, v, side='right') - 1
+                b = min(max(b, 0), len(edges) - 2)
+                key.append(b)
+            return tuple(key)
+        # bin all samples in this reference
+        pure_bins = {}
+        for _, p in pure.iterrows():
+            b = get_bins(p)
+            if b is None: continue
+            pure_bins.setdefault(b, []).append(p.name)
+        for _, a in additive.iterrows():
+            b = get_bins(a)
+            if b is None or b not in pure_bins or not pure_bins[b]: continue
+            match_idx = pure_bins[b].pop(0)
+            rows.append({'Reference': ref, 'Additive': a.get('Sintering additive'),
+                         'ref_idx': match_idx, 'add_idx': a.name, 'match_dist': 0.0, 'bin': b})
+    return pd.DataFrame(rows) if rows else None
+
+def run_meta_forest(df, ref_col, y_col='Ea_final', treatment_group='Pure'):
+    """Per-reference effect of each additive vs Pure (mean diff + CI)."""
+    if 'Sintering additive' not in df.columns: return None
+    rows = []
+    for ref, g in df.groupby(ref_col):
+        pure_vals = g[g['Sintering additive'] == treatment_group][y_col].dropna().values
+        if len(pure_vals) < 1: continue
+        for additive, sub in g[g['Sintering additive'] != treatment_group].groupby('Sintering additive'):
+            vals = sub[y_col].dropna().values
+            if len(vals) < 1: continue
+            diff = np.mean(vals) - np.mean(pure_vals)
+            se = np.sqrt(np.var(pure_vals)/len(pure_vals) + np.var(vals)/len(vals)) if len(pure_vals) > 1 and len(vals) > 1 else 0
+            rows.append({'Reference': ref, 'Additive': additive, 'diff': diff,
+                         'ci_low': diff - 1.96*se, 'ci_high': diff + 1.96*se,
+                         'n_additive': len(vals), 'n_pure': len(pure_vals)})
+    return pd.DataFrame(rows) if rows else None
+
+# ============================================
+# MAIN APPLICATION
 # ============================================
 
 def main():
-    st.set_page_config(
-        page_title="Ceramic Conductivity Data Explorer",
-        page_icon="🔬",
-        layout="wide"
-    )
-    
+    st.set_page_config(page_title="Ceramic Conductivity Data Explorer", page_icon="🔬", layout="wide")
     st.title("🔬 Interactive Analysis of Ceramic Conductivity")
     st.markdown("---")
-    
-    # ============================================
-    # SECTION A: Data Loading (text input)
-    # ============================================
+
     st.header("📊 Data Loading")
-    
-    st.markdown("**Paste your data in TSV (tab-separated) or CSV (comma-separated) format:**")
-    
-    data_input = st.text_area(
-        "Paste data here:",
-        height=200,
-        key="data_input"
-    )
-    
-    # Initialize session state for data
-    if 'df_loaded' not in st.session_state:
-        st.session_state.df_loaded = None
-    if 'df_hash' not in st.session_state:
-        st.session_state.df_hash = None
-    
+    st.markdown("**Paste data (TSV or CSV):**")
+    data_input = st.text_area("Paste data here:", height=180, key="data_input")
+
+    if 'df_loaded' not in st.session_state: st.session_state.df_loaded = None
+    if 'df_hash' not in st.session_state: st.session_state.df_hash = None
+
     if not data_input:
-        st.info("⏳ Please paste your data to begin")
-        st.stop()
-    
-    # Generate hash of input data to detect changes
-    import hashlib
+        st.info("⏳ Paste data to begin"); st.stop()
+
     current_hash = hashlib.md5(data_input.encode()).hexdigest()
-    
-    # Only reload if data has changed
     if st.session_state.df_hash != current_hash or st.session_state.df_loaded is None:
         try:
             lines = data_input.strip().split('\n')
-            if '\t' in lines[0]:
-                sep = '\t'
-            elif ',' in lines[0]:
-                sep = ','
-            else:
-                st.error("Unable to detect separator. Please use tab or comma.")
-                st.stop()
-            
+            sep = '\t' if '\t' in lines[0] else ','
             df = pd.read_csv(io.StringIO(data_input), sep=sep)
             df.columns = df.columns.str.strip()
-            
-            # Store in session state
-            st.session_state.df_loaded = df
-            st.session_state.df_hash = current_hash
-            
-            st.success(f"✅ Data loaded: {len(df)} rows, {len(df.columns)} columns")
-            st.dataframe(df.head(10))
-            
+            for c in TEMP_COLS + ['ρ, %', 'd, mkm', 'T sin', 'dop_cont', 'x, wt%', 'Ea (eV)']:
+                if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
+            st.session_state.df_loaded = df; st.session_state.df_hash = current_hash
+            st.success(f"✅ Loaded: {len(df)} rows, {len(df.columns)} columns")
         except Exception as e:
-            st.error(f"Error parsing data: {str(e)}")
-            st.stop()
+            st.error(f"Parse error: {e}"); st.stop()
     else:
-        # Use cached data
         df = st.session_state.df_loaded
-        st.success(f"✅ Using cached data: {len(df)} rows, {len(df.columns)} columns")
-        st.dataframe(df.head(10))
-    
-    # ============================================
-    # DESCRIPTOR AND Ea CALCULATION (with caching)
-    # ============================================
-    st.markdown("---")
-    st.header("🔄 Automatic Descriptor Calculation")
-    
-    # Generate hash for descriptor caching
-    df_hash_desc = hashlib.md5(df.to_csv().encode()).hexdigest()
-    
-    with st.spinner("Computing structural and electronegativity descriptors..."):
-        desc_df = compute_descriptors_cached(df_hash_desc, df)
-        
-        for col in desc_df.columns:
-            df[col] = desc_df[col]
-        
-        st.success("✅ Descriptors calculated (cached)")
-    
-    with st.spinner("Calculating activation energy (Ea)..."):
-        ea_values = calculate_ea_cached(df_hash_desc, df)
-        df['Ea_calculated'] = ea_values
-        df['Ea_final'] = df['Ea (eV)'].fillna(df['Ea_calculated'])
-        
-        st.success("✅ Ea calculated (cached)")
-    
-    st.dataframe(df[['References', 'tolerance_factor', 'chi_B_avg', 
-                    'chi_ratio', 'molar_mass', 'porosity', 
-                    'grain_boundary_area', 'Ea_final']].head(10))
-    
-    # ============================================
-    # SECTION C: Filters (sidebar)
-    # ============================================
-    st.sidebar.markdown("---")
-    st.sidebar.header("🔍 Data Filters")
-    
-    # Store filters in session state
-    if 'active_filters_count' not in st.session_state:
-        st.session_state.active_filters_count = 0
-    if 'active_filter_name' not in st.session_state:
-        st.session_state.active_filter_name = None
-    
-    active_filters_count = 0
-    active_filter_name = None
-    
-    if 'Atmospheres' in df.columns:
-        atmos_options = sorted([x for x in df['Atmospheres'].unique() 
-                               if pd.notna(x) and x != ''])
-        selected_atmos = st.sidebar.multiselect(
-            "Atmosphere",
-            options=['All'] + atmos_options,
-            default=['All'],
-            key="atmos_filter"
-        )
-        if 'All' not in selected_atmos:
-            df_filtered = df[df['Atmospheres'].isin(selected_atmos)]
-            active_filters_count += 1
-            active_filter_name = 'Atmospheres'
-        else:
-            df_filtered = df.copy()
-    else:
-        df_filtered = df.copy()
-    
-    if 'Humidity' in df.columns:
-        humidity_options = sorted([x for x in df_filtered['Humidity'].unique() 
-                                  if pd.notna(x) and x != ''])
-        if humidity_options:
-            selected_humidity = st.sidebar.multiselect(
-                "Humidity",
-                options=['All'] + humidity_options,
-                default=['All'],
-                key="humidity_filter"
-            )
-            if 'All' not in selected_humidity:
-                df_filtered = df_filtered[df_filtered['Humidity'].isin(selected_humidity)]
-                active_filters_count += 1
-                active_filter_name = 'Humidity'
-    
-    if 'Structure' in df.columns:
-        structure_options = sorted([x for x in df_filtered['Structure'].unique() 
-                                   if pd.notna(x) and x != ''])
-        if structure_options:
-            selected_structure = st.sidebar.multiselect(
-                "Structure",
-                options=['All'] + structure_options,
-                default=['All'],
-                key="structure_filter"
-            )
-            if 'All' not in selected_structure:
-                df_filtered['Structure_lower'] = df_filtered['Structure'].str.lower()
-                selected_structure_lower = [s.lower() for s in selected_structure]
-                df_filtered = df_filtered[df_filtered['Structure_lower'].isin(selected_structure_lower)]
-                active_filters_count += 1
-                active_filter_name = 'Structure'
-    
-    if 'Sintering additive' in df.columns:
-        additive_options = sorted([x for x in df_filtered['Sintering additive'].unique() 
-                                  if pd.notna(x) and x != ''])
-        if additive_options:
-            selected_additive = st.sidebar.multiselect(
-                "Sintering additive",
-                options=['All'] + additive_options,
-                default=['All'],
-                key="additive_filter"
-            )
-            if 'All' not in selected_additive:
-                df_filtered = df_filtered[df_filtered['Sintering additive'].isin(selected_additive)]
-                active_filters_count += 1
-                active_filter_name = 'Sintering additive'
-    
-    # Store active filters in session state
-    st.session_state.active_filters_count = active_filters_count
-    st.session_state.active_filter_name = active_filter_name
-    
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Value Ranges")
-    
-    if 'T sin' in df_filtered.columns:
-        t_min = float(df_filtered['T sin'].min()) if not df_filtered['T sin'].isna().all() else 0
-        t_max = float(df_filtered['T sin'].max()) if not df_filtered['T sin'].isna().all() else 1000
-        if t_max > t_min:
-            t_range = st.sidebar.slider(
-                "Sintering temperature, °C",
-                min_value=t_min,
-                max_value=t_max,
-                value=(t_min, t_max),
-                key="tsin_range"
-            )
-            df_filtered = df_filtered[(df_filtered['T sin'] >= t_range[0]) & 
-                                     (df_filtered['T sin'] <= t_range[1])]
-    
-    if 'dop_cont' in df_filtered.columns:
-        d_min = float(df_filtered['dop_cont'].min()) if not df_filtered['dop_cont'].isna().all() else 0
-        d_max = float(df_filtered['dop_cont'].max()) if not df_filtered['dop_cont'].isna().all() else 1
-        if d_max > d_min:
-            d_range = st.sidebar.slider(
-                "Dopant content",
-                min_value=d_min,
-                max_value=d_max,
-                value=(d_min, d_max),
-                key="dopant_range"
-            )
-            df_filtered = df_filtered[(df_filtered['dop_cont'] >= d_range[0]) & 
-                                     (df_filtered['dop_cont'] <= d_range[1])]
-    
-    if 'x, wt%' in df_filtered.columns:
-        x_min = float(df_filtered['x, wt%'].min()) if not df_filtered['x, wt%'].isna().all() else 0
-        x_max = float(df_filtered['x, wt%'].max()) if not df_filtered['x, wt%'].isna().all() else 10
-        if x_max > x_min:
-            x_range = st.sidebar.slider(
-                "Sintering additive concentration, wt%",
-                min_value=x_min,
-                max_value=x_max,
-                value=(x_min, x_max),
-                key="additive_range"
-            )
-            df_filtered = df_filtered[(df_filtered['x, wt%'] >= x_range[0]) & 
-                                     (df_filtered['x, wt%'] <= x_range[1])]
-    
-    st.sidebar.markdown(f"**Data after filtering: {len(df_filtered)}**")
-    
-    # ============================================
-    # MAIN TABS
-    # ============================================
-    tab1, tab2, tab3 = st.tabs(["🌡️ Heat Maps", "🫧 Bubble Charts", "📋 Data"])
-    
-    # ============================================
-    # TAB 1: HEAT MAPS
-    # ============================================
-    with tab1:
-        st.header("🌡️ Heat Maps")
-        
-        numeric_cols = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm', 
-                       'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
-                       'molar_mass', 'porosity', 'grain_boundary_area']
-        
-        temp_cols = ['σ total, 200', 'σ total, 250', 'σ total, 300', 'σ total, 350',
-                    'σ total, 400', 'σ total, 450', 'σ total, 500', 'σ total, 550',
-                    'σ total, 600', 'σ total, 650', 'σ total, 700', 'σ total, 750',
-                    'σ total, 800', 'σ total, 850', 'σ total, 900']
-        
-        available_temp_cols = [col for col in temp_cols if col in df_filtered.columns]
-        
-        temp_counts = {}
-        for col in available_temp_cols:
-            count = df_filtered[col].count()
-            temp_counts[col] = count
-        
-        if temp_counts:
-            default_temp = max(temp_counts, key=temp_counts.get)
-            temp_options = available_temp_cols + ['Ea_final']
-        else:
-            default_temp = 'Ea_final'
-            temp_options = ['Ea_final']
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            x_axis = st.selectbox(
-                "X-axis (descriptor)",
-                options=numeric_cols,
-                index=0,
-                key="heatmap_x"
-            )
-        
-        with col2:
-            y_axis = st.selectbox(
-                "Y-axis (descriptor)",
-                options=numeric_cols,
-                index=1 if len(numeric_cols) > 1 else 0,
-                key="heatmap_y"
-            )
-        
-        with col3:
-            z_axis = st.selectbox(
-                "Color scale (Z)",
-                options=temp_options,
-                index=0,
-                key="heatmap_z"
-            )
-        
-        # Outlier removal controls for X and Y
-        col1, col2 = st.columns(2)
-        with col1:
-            outlier_x = st.selectbox(
-                "Remove outliers from X",
-                options=[0, 1, 2, 3],
-                index=0,
-                format_func=lambda x: 'None' if x == 0 else str(x),
-                key="heatmap_outlier_x"
-            )
-        with col2:
-            outlier_y = st.selectbox(
-                "Remove outliers from Y",
-                options=[0, 1, 2, 3],
-                index=0,
-                format_func=lambda x: 'None' if x == 0 else str(x),
-                key="heatmap_outlier_y"
-            )
-        
-        # Apply outlier removal
-        df_plot = df_filtered.copy()
-        if outlier_x > 0:
-            df_plot = remove_outliers(df_plot, x_axis, outlier_x)
-        if outlier_y > 0:
-            df_plot = remove_outliers(df_plot, y_axis, outlier_y)
-        
-        if z_axis in available_temp_cols:
-            selected_temp = st.selectbox(
-                "Select temperature for conductivity",
-                options=available_temp_cols,
-                index=available_temp_cols.index(default_temp) if default_temp in available_temp_cols else 0,
-                key="heatmap_temp"
-            )
-            z_col = selected_temp
-            z_label = selected_temp.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
-        else:
-            z_col = 'Ea_final'
-            z_label = 'Ea (eV)'
-        
-        plot_type = st.radio(
-            "Heat map type",
-            options=['Scatter with color scale', 'Contour plot', '3D surface'],
-            horizontal=True,
-            key="heatmap_type"
-        )
-        
-        palette_name = st.selectbox(
-            "Color palette",
-            options=list(COLOR_PALETTES.keys()),
-            index=0,
-            key="heatmap_palette"
-        )
-        palette = COLOR_PALETTES[palette_name]
-        
-        # Additional controls for contour plot
-        if plot_type == 'Contour plot':
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                grid_resolution = st.slider(
-                    "Smoothing (grid resolution)",
-                    min_value=20,
-                    max_value=100,
-                    value=50,
-                    step=10,
-                    key="contour_resolution"
-                )
-            with col2:
-                show_contour_lines = st.checkbox("Show contour lines", value=True, key="contour_lines")
-            with col3:
-                show_contour_labels = st.checkbox("Show contour labels", value=True, key="contour_labels")
-        else:
-            grid_resolution = 50
-            show_contour_lines = True
-            show_contour_labels = True
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            log_x = st.checkbox("log10(X)", value=False, key="heatmap_log_x")
-        with col2:
-            log_y = st.checkbox("log10(Y)", value=False, key="heatmap_log_y")
-        with col3:
-            log_z = st.checkbox("log10(Z)", value=False, key="heatmap_log_z")
-        
-        if st.button("Generate Heat Map", key="heatmap_btn"):
-            if len(df_plot) == 0:
-                st.warning("No data available after filtering")
-            else:
-                # Determine marker style based on active filters
-                marker_style, show_legend, filter_name_active = get_filter_markers(
-                    df_plot, st.session_state.active_filters_count)
-                
-                if plot_type == 'Scatter with color scale':
-                    fig = create_scatter_heatmap(
-                        df_plot, x_axis, y_axis, z_col,
-                        log_x, log_y, log_z, palette,
-                        '', x_axis, y_axis, z_label,
-                        marker_style, show_legend, filter_name_active
-                    )
-                elif plot_type == 'Contour plot':
-                    fig = create_contour_heatmap(
-                        df_plot, x_axis, y_axis, z_col,
-                        log_x, log_y, log_z, palette,
-                        '', x_axis, y_axis, z_label,
-                        grid_resolution, show_contour_lines, show_contour_labels
-                    )
-                else:
-                    fig = create_3d_surface(
-                        df_plot, x_axis, y_axis, z_col,
-                        log_x, log_y, log_z, palette,
-                        '', x_axis, y_axis, z_label
-                    )
-                
-                if fig is not None:
-                    st.pyplot(fig)
-                    
-                    buf = download_plot(fig, "heatmap.png")
-                    st.download_button(
-                        label="📥 Download Plot (PNG, 600 dpi)",
-                        data=buf,
-                        file_name="heatmap.png",
-                        mime="image/png",
-                        key="download_heatmap"
-                    )
-                    
-                    plt.close(fig)
-    
-    # ============================================
-    # TAB 2: BUBBLE CHARTS
-    # ============================================
-    with tab2:
-        st.header("🫧 Bubble Charts")
-        
-        numeric_cols_bubble = ['dop_cont', 'x, wt%', 'ρ, %', 'd, mkm', 
-                              'tolerance_factor', 'chi_B_avg', 'chi_ratio', 
-                              'molar_mass', 'porosity', 'grain_boundary_area']
-        
-        y_options = available_temp_cols + ['Ea_final']
-        
-        if available_temp_cols:
-            default_y = max(available_temp_cols, 
-                           key=lambda c: df_filtered[c].count() if c in df_filtered.columns else 0)
-            y_index = y_options.index(default_y) if default_y in y_options else 0
-        else:
-            default_y = 'Ea_final'
-            y_index = y_options.index('Ea_final') if 'Ea_final' in y_options else 0
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            y_axis_bubble = st.selectbox(
-                "Y-axis (conductivity/Ea)",
-                options=y_options,
-                index=y_index,
-                key="bubble_y"
-            )
-        
-        with col2:
-            x_axis_bubble = st.selectbox(
-                "X-axis",
-                options=numeric_cols_bubble,
-                index=0,
-                key="bubble_x"
-            )
-        
-        with col3:
-            color_axis = st.selectbox(
-                "Bubble color",
-                options=['None'] + numeric_cols_bubble + ['Sintering additive', 'Atmospheres', 'Humidity', 'Structure'],
-                index=0,
-                key="bubble_color"
-            )
-        
-        with col4:
-            size_axis = st.selectbox(
-                "Bubble size",
-                options=['None'] + numeric_cols_bubble,
-                index=0,
-                key="bubble_size"
-            )
-        
-        # Outlier removal controls for X and Y in bubble charts
-        col1, col2 = st.columns(2)
-        with col1:
-            outlier_x_bubble = st.selectbox(
-                "Remove outliers from X",
-                options=[0, 1, 2, 3],
-                index=0,
-                format_func=lambda x: 'None' if x == 0 else str(x),
-                key="bubble_outlier_x"
-            )
-        with col2:
-            outlier_y_bubble = st.selectbox(
-                "Remove outliers from Y",
-                options=[0, 1, 2, 3],
-                index=0,
-                format_func=lambda x: 'None' if x == 0 else str(x),
-                key="bubble_outlier_y"
-            )
-        
-        # Apply outlier removal
-        df_plot_bubble = df_filtered.copy()
-        if outlier_x_bubble > 0:
-            df_plot_bubble = remove_outliers(df_plot_bubble, x_axis_bubble, outlier_x_bubble)
-        if outlier_y_bubble > 0:
-            df_plot_bubble = remove_outliers(df_plot_bubble, y_axis_bubble, outlier_y_bubble)
-        
-        if y_axis_bubble in available_temp_cols:
-            y_label = y_axis_bubble.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
-        else:
-            y_label = 'Ea (eV)'
-        
-        palette_name_bubble = st.selectbox(
-            "Color palette for bubbles",
-            options=list(COLOR_PALETTES.keys()),
-            index=0,
-            key="bubble_palette"
-        )
-        palette_bubble = COLOR_PALETTES[palette_name_bubble]
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            log_x_bubble = st.checkbox("log10(X)", value=False, key="bubble_log_x")
-        with col2:
-            log_y_bubble = st.checkbox("log10(Y)", value=False, key="bubble_log_y")
-        with col3:
-            log_color_bubble = st.checkbox("log10(Color)", value=False, key="bubble_log_color")
-        with col4:
-            log_size_bubble = st.checkbox("log10(Size)", value=False, key="bubble_log_size")
-        
-        # Marginal distributions controls
-        col1, col2 = st.columns(2)
-        with col1:
-            show_marginals = st.checkbox(
-                "Show marginal distributions (ggside)",
-                value=False,
-                key="bubble_show_marginals"
-            )
-        with col2:
-            normalize_marginals = st.checkbox(
-                "Normalize marginals (per group)",
-                value=False,
-                key="bubble_normalize_marginals",
-                disabled=not show_marginals
-            )
-        
-        if st.button("Generate Bubble Chart", key="bubble_btn"):
-            if len(df_plot_bubble) == 0:
-                st.warning("No data available after filtering")
-            else:
-                if color_axis == 'None':
-                    df_temp = df_plot_bubble.copy()
-                    df_temp['_color_temp'] = 1
-                    color_col_bubble = '_color_temp'
-                else:
-                    color_col_bubble = color_axis
-                
-                if size_axis == 'None':
-                    df_temp = df_plot_bubble.copy()
-                    df_temp['_size_temp'] = 1
-                    size_col_bubble = '_size_temp'
-                else:
-                    size_col_bubble = size_axis
-                
-                # Determine marker style based on active filters
-                marker_style, show_legend, filter_name_active = get_filter_markers(
-                    df_plot_bubble, st.session_state.active_filters_count)
-                
-                # Determine whether to pass size info for marginals
-                size_col_name_for_marg = None
-                size_col_raw_for_marg = None
-                if size_axis != 'None':
-                    size_col_name_for_marg = size_axis
-                    size_col_raw_for_marg = size_axis
-                
-                filter_display_name_for_marg = None
-                if show_legend and filter_name_active is not None:
-                    filter_display_name_for_marg = filter_name_active
-                
-                fig = create_bubble_chart(
-                    df_plot_bubble, x_axis_bubble, y_axis_bubble, 
-                    color_col_bubble, size_col_bubble,
-                    log_x_bubble, log_y_bubble, log_color_bubble, log_size_bubble,
-                    palette_bubble, '', x_axis_bubble, y_label,
-                    marker_style, show_legend, filter_name_active,
-                    size_col_name=size_col_name_for_marg,
-                    filter_display_name=filter_display_name_for_marg,
-                    show_marginals=show_marginals,
-                    normalize_marginals=normalize_marginals,
-                    size_col_raw=size_col_raw_for_marg,
-                    y_col_raw=y_axis_bubble
-                )
-                
-                if fig is not None:
-                    st.pyplot(fig)
-                    
-                    buf = download_plot(fig, "bubble_chart.png")
-                    st.download_button(
-                        label="📥 Download Plot (PNG, 600 dpi)",
-                        data=buf,
-                        file_name="bubble_chart.png",
-                        mime="image/png",
-                        key="download_bubble"
-                    )
-                    
-                    plt.close(fig)
-    
-    # ============================================
-    # TAB 3: DATA
-    # ============================================
-    with tab3:
-        st.header("📋 Data with Calculated Descriptors")
-        
-        st.dataframe(df_filtered)
-        
-        csv_data = df_filtered.to_csv(index=False, sep='\t')
-        st.download_button(
-            label="📥 Download Data (TSV)",
-            data=csv_data,
-            file_name="filtered_data.tsv",
-            mime="text/tab-separated-values",
-            key="download_data"
-        )
-        
-        st.subheader("📊 Data Statistics")
-        numeric_display = df_filtered.select_dtypes(include=[np.number])
-        if not numeric_display.empty:
-            st.dataframe(numeric_display.describe())
+        st.success(f"✅ Cached: {len(df)} rows, {len(df.columns)} columns")
 
-# ============================================
-# APPLICATION LAUNCH
-# ============================================
+    with st.spinner("Computing descriptors..."):
+        df_hash_desc = hashlib.md5(df.to_csv().encode()).hexdigest()
+        desc = compute_descriptors_cached(df_hash_desc, df)
+        for c in desc.columns: df[c] = desc[c]
+        df['Ea_calculated'] = calculate_ea_cached(df_hash_desc, df)
+        df['Ea_final'] = df.get('Ea (eV)', pd.Series(index=df.index)).fillna(df['Ea_calculated'])
+        curve_feats = compute_curve_features_cached(df_hash_desc, df)
+        for c in curve_feats.columns: df[c] = curve_feats[c]
+        df = build_derived_features(df)
+
+    st.sidebar.header("🔍 Filters")
+    df_f = df.copy()
+    active_count = 0
+    for fname in FILTER_LABELS.keys():
+        if fname in df_f.columns:
+            opts = sorted([x for x in df_f[fname].dropna().unique() if x != ''])
+            if opts:
+                sel = st.sidebar.multiselect(fname, options=['All'] + opts, default=['All'], key=f'filt_{fname}')
+                if 'All' not in sel:
+                    df_f = df_f[df_f[fname].isin(sel)]
+                    active_count += 1
+    st.sidebar.markdown("---")
+    if 'T sin' in df_f.columns and df_f['T sin'].notna().any():
+        tmin, tmax = float(df_f['T sin'].min()), float(df_f['T sin'].max())
+        if tmax > tmin:
+            r = st.sidebar.slider("T sin (°C)", tmin, tmax, (tmin, tmax), key='tsin')
+            df_f = df_f[(df_f['T sin'] >= r[0]) & (df_f['T sin'] <= r[1])]
+    if 'dop_cont' in df_f.columns and df_f['dop_cont'].notna().any():
+        dmin, dmax = float(df_f['dop_cont'].min()), float(df_f['dop_cont'].max())
+        if dmax > dmin:
+            r = st.sidebar.slider("Dopant content", dmin, dmax, (dmin, dmax), key='dopc')
+            df_f = df_f[(df_f['dop_cont'] >= r[0]) & (df_f['dop_cont'] <= r[1])]
+    if 'x, wt%' in df_f.columns and df_f['x, wt%'].notna().any():
+        xmin, xmax = float(df_f['x, wt%'].min()), float(df_f['x, wt%'].max())
+        if xmax > xmin:
+            r = st.sidebar.slider("Additive concentration", xmin, xmax, (xmin, xmax), key='xw')
+            df_f = df_f[(df_f['x, wt%'] >= r[0]) & (df_f['x, wt%'] <= r[1])]
+    st.sidebar.markdown(f"**Rows: {len(df_f)}**")
+
+    tabs = st.tabs(["📊 Data & QC", "🔍 Exploratory Plots", "🔗 Correlations",
+                    "📈 Statistical Comparisons", "🎯 Multivariate",
+                    "🤖 Regression & Attribution", "🔬 Interactions & Sensitivity",
+                    "🌡️ Curve Analysis", "🎯 Additive vs Pure", "📋 Export"])
+
+    with tabs[0]:
+        st.header("📊 Data & Quality Control")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Rows", len(df_f))
+        col2.metric("References", df_f['References'].nunique() if 'References' in df_f else 0)
+        col3.metric("Additives", df_f['Sintering additive'].nunique() if 'Sintering additive' in df_f else 0)
+        col4.metric("Valid curves", int(df_f['curve_valid'].sum()) if 'curve_valid' in df_f else 0)
+        st.subheader("Data preview"); st.dataframe(df_f.head(15))
+        st.subheader("Missingness")
+        try: st.pyplot(plot_missingness(df_f))
+        except: st.info("Unavailable")
+        st.subheader("Balance (Additive × Atmosphere)")
+        if 'Sintering additive' in df_f.columns and 'Atmospheres' in df_f.columns:
+            st.dataframe(pd.crosstab(df_f['Sintering additive'], df_f['Atmospheres']))
+        st.subheader("Coverage of descriptor space")
+        c1, c2 = st.columns(2)
+        cov_x = c1.selectbox("X", NUMERIC_DESCRIPTORS, index=2, key='qc_x')
+        cov_y = c2.selectbox("Y", NUMERIC_DESCRIPTORS, index=0, key='qc_y')
+        try:
+            st.pyplot(plot_coverage_heatmap(df_f, cov_x, cov_y))
+            st.pyplot(plot_convex_hull(df_f, cov_x, cov_y))
+            st.pyplot(plot_convex_hull_pca(df_f, NUMERIC_DESCRIPTORS))
+        except: pass
+        st.subheader("Descriptor summary"); st.dataframe(df_f[NUMERIC_DESCRIPTORS + ['Ea_final']].describe())
+
+    with tabs[1]:
+        st.header("🔍 Exploratory Plots")
+        plot_kind = st.selectbox("Plot type",
+            ["Heat map (scatter)", "Heat map (contour)", "Heat map (3D)",
+             "Heat map (contour + CI bands)", "Bubble chart", "Pairplot",
+             "Violin + Box", "Parallel coordinates", "Radar",
+             "Ternary (composition)", "Sankey"], key='expl_kind')
+        marker_style, show_leg, filt_name = get_filter_markers(df_f, active_count)
+
+        if plot_kind.startswith("Heat map"):
+            c1, c2, c3 = st.columns(3)
+            x_col = c1.selectbox("X", NUMERIC_DESCRIPTORS, index=0, key='ex_x')
+            y_col = c2.selectbox("Y", NUMERIC_DESCRIPTORS, index=1, key='ex_y')
+            z_opts = [c for c in TEMP_COLS if c in df_f.columns] + ['Ea_final']
+            z_col = c3.selectbox("Z", z_opts, index=0, key='ex_z')
+            d_plot = remove_outliers(df_f, x_col, st.number_input("Outliers X", 0, 5, 0, key='ex_ox'))
+            d_plot = remove_outliers(d_plot, y_col, st.number_input("Outliers Y", 0, 5, 0, key='ex_oy'))
+            c1, c2, c3, c4 = st.columns(4)
+            logx = c1.checkbox("log X", key='ex_lx'); logy = c2.checkbox("log Y", key='ex_ly')
+            logz = c3.checkbox("log Z", key='ex_lz'); pal = c4.selectbox("Palette", list(COLOR_PALETTES.keys()), key='ex_pal')
+            if st.button("Generate", key='ex_btn'):
+                zlab = z_col.replace('σ total, ', 'σ at ') + ' °C (mS/cm)' if z_col in TEMP_COLS else 'Ea (eV)'
+                try:
+                    if "scatter" in plot_kind:
+                        fig = create_scatter_heatmap(d_plot, x_col, y_col, z_col, logx, logy, logz,
+                                                     COLOR_PALETTES[pal], x_col, y_col, zlab, marker_style, show_leg, filt_name)
+                    elif "CI bands" in plot_kind:
+                        fig = create_contour_with_bands(d_plot, x_col, y_col, z_col, logx, logy, logz,
+                                                        COLOR_PALETTES[pal], x_col, y_col, zlab)
+                    elif "contour" in plot_kind:
+                        fig = create_contour_heatmap(d_plot, x_col, y_col, z_col, logx, logy, logz,
+                                                     COLOR_PALETTES[pal], x_col, y_col, zlab)
+                    else:
+                        fig = create_3d_surface(d_plot, x_col, y_col, z_col, logx, logy, logz,
+                                                COLOR_PALETTES[pal], x_col, y_col, zlab)
+                    if fig: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Bubble chart":
+            y_opts = [c for c in TEMP_COLS if c in df_f.columns] + ['Ea_final']
+            c1, c2, c3, c4 = st.columns(4)
+            y_col = c1.selectbox("Y", y_opts, index=0, key='bb_y')
+            x_col = c2.selectbox("X", NUMERIC_DESCRIPTORS, index=0, key='bb_x')
+            color_col = c3.selectbox("Color", ['None'] + NUMERIC_DESCRIPTORS + list(FILTER_LABELS.keys()), index=0, key='bb_c')
+            size_col = c4.selectbox("Size", ['None'] + NUMERIC_DESCRIPTORS, index=0, key='bb_s')
+            c1, c2, c3, c4 = st.columns(4)
+            lx = c1.checkbox("log X", key='bb_lx'); ly = c2.checkbox("log Y", key='bb_ly')
+            lc = c3.checkbox("log C", key='bb_lc'); ls = c4.checkbox("log S", key='bb_ls')
+            show_marg = st.checkbox("Marginal distributions", key='bb_marg')
+            if st.button("Generate bubble", key='bb_btn'):
+                try:
+                    d_plot = df_f.copy()
+                    if color_col == 'None': d_plot['_c'] = 1; color_col = '_c'
+                    if size_col == 'None': d_plot['_s'] = 1; size_col = '_s'
+                    ylab = y_col.replace('σ total, ', 'σ at ') + ' °C (mS/cm)' if y_col in TEMP_COLS else 'Ea (eV)'
+                    fig = create_bubble_chart(d_plot, x_col, y_col, color_col, size_col, lx, ly, lc, ls,
+                                              COLOR_PALETTES['Viridis'], x_col, ylab, marker_style, show_leg, filt_name,
+                                              size_col if size_col != '_s' else None, filt_name if show_leg else None,
+                                              show_marg, False, size_col if size_col != '_s' else None, y_col)
+                    if fig: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Pairplot":
+            cols = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['Ea_final'],
+                                   default=['ρ, %', 'd, mkm', 'Ea_final'], key='pp_cols')
+            hue = st.selectbox("Hue", ['None'] + list(FILTER_LABELS.keys()), key='pp_hue')
+            if st.button("Generate", key='pp_btn') and len(cols) >= 2:
+                try:
+                    fig = plot_pairplot(df_f, cols, None if hue == 'None' else hue)
+                    if fig: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Violin + Box":
+            y_col = st.selectbox("Y", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='vb_y')
+            g_col = st.selectbox("Group by", list(FILTER_LABELS.keys()), key='vb_g')
+            log_y = st.checkbox("log Y", key='vb_log')
+            if st.button("Generate", key='vb_btn'):
+                try:
+                    fig = plot_violin_box(df_f, y_col, g_col, log_y)
+                    if fig: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Parallel coordinates":
+            cols = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['Ea_final'],
+                                   default=['ρ, %', 'd, mkm', 'Ea_final'], key='pc_cols')
+            hue = st.selectbox("Hue", ['None'] + list(FILTER_LABELS.keys()), key='pc_hue')
+            if st.button("Generate", key='pc_btn') and len(cols) >= 2:
+                try:
+                    fig = plot_parallel_coordinates(df_f, cols, None if hue == 'None' else hue)
+                    if fig: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Radar":
+            if 'Sintering additive' in df_f.columns:
+                additives = st.multiselect("Additives", sorted(df_f['Sintering additive'].dropna().unique()),
+                                            default=sorted(df_f['Sintering additive'].dropna().unique())[:4], key='rd_a')
+                cols = st.multiselect("Axes", NUMERIC_DESCRIPTORS + ['Ea_final'],
+                                       default=['ρ, %', 'd, mkm', 'Ea_final', 'porosity'], key='rd_c')
+                if st.button("Generate", key='rd_btn') and len(cols) >= 3:
+                    try:
+                        fig = plot_radar(df_f, additives, cols)
+                        if fig: st.pyplot(fig); plt.close(fig)
+                    except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Ternary (composition)":
+            comp = st.multiselect("Composition columns (3)", ['x_B1', 'x_B2', 'x_dop'],
+                                   default=['x_B1', 'x_B2', 'x_dop'], key='tr_c')
+            color_col = st.selectbox("Color", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='tr_z')
+            log_c = st.checkbox("log Color", key='tr_logc')
+            if st.button("Generate", key='tr_btn') and len(comp) == 3:
+                try:
+                    fig = plot_ternary(df_f, comp, color_col, log_col=log_c)
+                    if fig: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+        elif plot_kind == "Sankey":
+            c1, c2, c3 = st.columns(3)
+            src = c1.selectbox("Source", list(FILTER_LABELS.keys()), key='sk_src')
+            mid = c2.selectbox("Middle", list(FILTER_LABELS.keys()), key='sk_mid')
+            tgt = c3.selectbox("Target (numeric)", ['Ea_final'], key='sk_tgt')
+            if st.button("Generate Sankey", key='sk_btn'):
+                try:
+                    fig = plot_sankey(df_f, src, mid, tgt)
+                    if fig is not None:
+                        if PLOTLY_OK and hasattr(fig, 'to_html'):
+                            st.plotly_chart(fig, use_container_width=True)
+                        else: st.pyplot(fig); plt.close(fig)
+                except Exception as e: st.error(f"Error: {e}")
+
+    with tabs[2]:
+        st.header("🔗 Correlation Analysis")
+        cols = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns],
+                              default=['ρ, %', 'd, mkm', 'T sin', 'dop_cont', 'Ea_final'], key='corr_cols')
+        method = st.selectbox("Method", ["pearson", "spearman", "kendall"], key='corr_m')
+        if st.button("Compute matrix", key='corr_btn') and len(cols) >= 2:
+            try:
+                d = df_f[cols].dropna()
+                corr = d.corr(method=method)
+                st.pyplot(plot_correlation_heatmap(corr, f"{method.capitalize()} correlation (n={len(d)})"))
+                st.pyplot(plot_clustermap(corr))
+                st.subheader("Mutual information")
+                if SKLEARN_OK:
+                    mi = np.zeros((len(cols), len(cols)))
+                    for i, ci in enumerate(cols):
+                        for j, cj in enumerate(cols):
+                            if i == j: mi[i, j] = 1.0
+                            else:
+                                sub = df_f[[ci, cj]].dropna()
+                                if len(sub) > 5:
+                                    mi[i, j] = mutual_info_regression(sub[[ci]], sub[cj], random_state=42)[0]
+                    st.dataframe(pd.DataFrame(mi, index=cols, columns=cols).style.format("{:.3f}").background_gradient(cmap='viridis'))
+                st.subheader("Distance correlation")
+                dcor_results = []
+                for ci in cols:
+                    for cj in cols:
+                        if ci >= cj: continue
+                        r = run_distance_correlation(df_f, ci, cj)
+                        if r: dcor_results.append({'X': ci, 'Y': cj, 'dCor': r['dcor'], 'n': r['n']})
+                if dcor_results:
+                    st.dataframe(pd.DataFrame(dcor_results).sort_values('dCor', ascending=False).style.format({'dCor': '{:.3f}'}))
+                st.download_button("📥 Download matrix (TSV)", corr.to_csv(sep='\t'),
+                                    file_name="correlations.tsv", mime="text/tab-separated-values")
+            except Exception as e: st.error(f"Error: {e}")
+        st.markdown("---"); st.subheader("Partial correlation")
+        c1, c2 = st.columns(2)
+        x_p = c1.selectbox("X", NUMERIC_DESCRIPTORS, key='pc_x')
+        y_p = c2.selectbox("Y", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='pc_y')
+        controls = st.multiselect("Control for", NUMERIC_DESCRIPTORS, default=['T sin'], key='pc_ctrl')
+        if st.button("Compute partial", key='pc_btn') and controls:
+            res = run_partial_correlation(df_f, x_p, y_p, controls)
+            if res: st.success(f"Partial r = {res['partial_r']:.3f}, p = {res['p']:.3g}, n = {res['n']}")
+            else: st.warning("Not enough data")
+
+    with tabs[3]:
+        st.header("📈 Statistical Comparisons")
+        y_col = st.selectbox("Outcome", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='sc_y')
+        group_col = st.selectbox("Group by", list(FILTER_LABELS.keys()), key='sc_g')
+        c1, c2 = st.columns(2)
+        if c1.button("Run ANOVA", key='sc_a'):
+            res = run_anova(df_f, y_col, group_col)
+            if res: st.success(f"F = {res['F']:.3f}, p = {res['p']:.3g}, η² = {res['eta_squared']:.3f}, n = {res['n_total']}")
+            else: st.warning("Insufficient data")
+        if c2.button("Run Kruskal-Wallis", key='sc_k'):
+            res = run_kruskal(df_f, y_col, group_col)
+            if res: st.success(f"H = {res['H']:.3f}, p = {res['p']:.3g}, n = {res['n_total']}")
+            else: st.warning("Insufficient data")
+        st.markdown("---"); st.subheader("Post-hoc tests")
+        c1, c2 = st.columns(2)
+        if c1.button("Dunn post-hoc", key='sc_dunn'):
+            res = run_dunn_posthoc(df_f, y_col, group_col)
+            if res is not None and len(res) > 0:
+                st.dataframe(res.style.format({'z': '{:.3f}', 'p_raw': '{:.3g}', 'p_adj': '{:.3g}'}))
+                fig = plot_dunn_posthoc(res['pair'].tolist(), res['z'].tolist(), res['p_adj'].tolist())
+                if fig: st.pyplot(fig); plt.close(fig)
+            else: st.warning("Dunn failed")
+        if c2.button("Tukey HSD", key='sc_tukey'):
+            res = run_tukey(df_f, y_col, group_col)
+            if res is not None: st.text(str(res.summary()))
+            else: st.warning("Tukey failed or statsmodels missing")
+        st.markdown("---"); st.subheader("Pairwise vs Pure")
+        if 'Sintering additive' in df_f.columns:
+            if st.button("Compute pairwise", key='sc_p'):
+                res = run_pairwise_comparisons(df_f, y_col, 'Sintering additive', 'Pure')
+                if res is not None and len(res) > 0:
+                    st.dataframe(res.style.format({c: '{:.4g}' for c in ['mean','diff','ci_low','ci_high','p','cohen_d']}))
+                    try:
+                        fig = plot_forest(res['diff'].values, res['group'].tolist(),
+                                          list(zip(res['ci_low'], res['ci_high'])), f'Effect on {y_col}')
+                        if fig: st.pyplot(fig); plt.close(fig)
+                    except: pass
+                    st.download_button("📥 Download (TSV)", res.to_csv(sep='\t', index=False),
+                                        file_name="pairwise.tsv", mime="text/tab-separated-values")
+                else: st.warning("Insufficient data")
+        st.markdown("---"); st.subheader("Meta-forest by Reference")
+        if 'References' in df_f.columns and st.button("Build meta-forest", key='sc_meta'):
+            res = run_meta_forest(df_f, 'References', y_col, 'Pure')
+            if res is not None and len(res) > 0:
+                st.dataframe(res)
+                fig = plot_meta_forest(res['diff'].values, list(zip(res['ci_low'], res['ci_high'])),
+                                       [f"{r['Reference']}/{r['Additive']}" for _, r in res.iterrows()])
+                if fig: st.pyplot(fig); plt.close(fig)
+                st.download_button("📥 Download meta-forest (TSV)", res.to_csv(sep='\t', index=False),
+                                    file_name="meta_forest.tsv", mime="text/tab-separated-values")
+            else: st.warning("Not enough references")
+        st.markdown("---"); st.subheader("Mixed-effects model")
+        if STATSMODELS_OK:
+            fixed = st.multiselect("Fixed effects", NUMERIC_DESCRIPTORS + ['is_additive'],
+                                    default=['is_additive', 'ρ, %', 'T sin'], key='me_fx')
+            if st.button("Fit mixed model", key='me_btn') and fixed:
+                res = run_mixed_effects(df_f, y_col, fixed)
+                if res is not None: st.text(str(res.summary()))
+                else: st.warning("Model failed or insufficient data")
+        else: st.info("statsmodels not installed")
+
+    with tabs[4]:
+        st.header("🎯 Multivariate Analysis")
+        method = st.selectbox("Method", ["PCA", "FAMD", "UMAP", "t-SNE", "Cluster (k-means)"], key='mv_m')
+        cols = st.multiselect("Numeric features", NUMERIC_DESCRIPTORS + ['Ea_final'],
+                              default=['ρ, %', 'd, mkm', 'T sin', 'dop_cont', 'Ea_final'], key='mv_c')
+        if method == "PCA" and st.button("Run PCA", key='mv_pca') and len(cols) >= 2:
+            res = run_pca(df_f, cols)
+            if res:
+                color_col = st.selectbox("Color by", ['None'] + NUMERIC_DESCRIPTORS, key='mv_pca_c')
+                color_vals = df_f.loc[res['index'], color_col].values if color_col != 'None' else None
+                st.pyplot(plot_pca_biplot(res['scores'], res['loadings'], res['explained'], res['cols'], color_vals))
+                st.info(f"Explained variance: PC1={res['explained'][0]*100:.1f}%, PC2={res['explained'][1]*100:.1f}%")
+                st.dataframe(pd.DataFrame(res['loadings'][:, :2], columns=['PC1', 'PC2'], index=res['cols']))
+            else: st.warning("PCA failed")
+        elif method == "FAMD" and st.button("Run FAMD", key='mv_famd'):
+            cat_cols = st.multiselect("Categorical features", list(FILTER_LABELS.keys()),
+                                       default=list(FILTER_LABELS.keys()), key='mv_famd_cat')
+            res = run_famd(df_f, cols, cat_cols)
+            if res:
+                st.info(f"Method: {res['method']}")
+                fig, ax = plt.subplots(figsize=(8, 6))
+                ax.scatter(res['scores'][:, 0], res['scores'][:, 1], s=50, c='steelblue', edgecolors='black', alpha=0.8)
+                style_axis(ax, f'Dim 1 ({res["explained"][0]*100:.1f}%)', f'Dim 2 ({res["explained"][1]*100:.1f}%)')
+                st.pyplot(fig); plt.close(fig)
+        elif method == "UMAP" and st.button("Run UMAP", key='mv_umap'):
+            if not UMAP_OK: st.warning("umap-learn not installed")
+            else:
+                res = run_umap(df_f, cols)
+                if res:
+                    color_col = st.selectbox("Color by", ['None'] + NUMERIC_DESCRIPTORS, key='mv_umap_c')
+                    color_vals = df_f.loc[res['index'], color_col].values if color_col != 'None' else None
+                    st.pyplot(plot_embedding_2d(res['embedding'], 'UMAP', color_vals))
+                else: st.warning("UMAP failed")
+        elif method == "t-SNE" and st.button("Run t-SNE", key='mv_tsne'):
+            if not SKLEARN_OK: st.warning("sklearn not installed")
+            else:
+                perplexity = st.slider("Perplexity", 5, 50, 15, key='mv_tsne_p')
+                res = run_tsne(df_f, cols, perplexity)
+                if res:
+                    color_col = st.selectbox("Color by", ['None'] + NUMERIC_DESCRIPTORS, key='mv_tsne_c')
+                    color_vals = df_f.loc[res['index'], color_col].values if color_col != 'None' else None
+                    st.pyplot(plot_embedding_2d(res['embedding'], 't-SNE', color_vals))
+                else: st.warning("t-SNE failed")
+        elif method == "Cluster (k-means)" and st.button("Run clustering", key='mv_clust') and len(cols) >= 2 and SKLEARN_OK:
+            n_cl = st.slider("Clusters", 2, 8, 3, key='mv_ncl')
+            try:
+                d = df_f[cols].dropna()
+                X = StandardScaler().fit_transform(d)
+                km = KMeans(n_clusters=n_cl, random_state=42, n_init=10)
+                labels = km.fit_predict(X)
+                st.dataframe(pd.Series(labels, index=d.index, name='cluster').value_counts().rename('count'))
+                st.dataframe(d.groupby(labels).mean())
+            except Exception as e: st.error(f"Error: {e}")
+
+    with tabs[5]:
+        st.header("🤖 Regression & Attribution")
+        target = st.selectbox("Target", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='rg_t')
+        features = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['is_additive'],
+                                   default=['is_additive', 'ρ, %', 'T sin', 'd, mkm'], key='rg_f')
+        if st.button("Fit Elastic Net", key='rg_btn') and features:
+            res = run_elastic_net(df_f, target, features)
+            if res:
+                st.success(f"alpha = {res['alpha']:.4g}, l1_ratio = {res['l1_ratio']:.2f}, n = {res['n']}")
+                coef_df = pd.DataFrame({'Feature': res['cols'], 'Coefficient': res['coefs']}).sort_values('Coefficient', key=abs, ascending=False)
+                st.dataframe(coef_df)
+                fig, ax = plt.subplots(figsize=(7, 4))
+                ax.barh(coef_df['Feature'], coef_df['Coefficient'],
+                        color=['red' if v < 0 else 'green' for v in coef_df['Coefficient']], edgecolor='black')
+                ax.axvline(0, color='black', lw=0.8); style_axis(ax, 'Coefficient', 'Feature')
+                st.pyplot(fig); plt.close(fig)
+                perm = run_permutation_importance(res['model'], res['X'], res['y'], res['cols'])
+                if perm is not None:
+                    st.subheader("Permutation importance"); st.dataframe(perm)
+                shap_res = run_shap_linear(res['model'], res['X'], res['cols'])
+                if shap_res is not None:
+                    st.subheader(f"SHAP ({shap_res['method']})")
+                    mean_abs = np.abs(shap_res['shap_values']).mean(axis=0)
+                    shap_df = pd.DataFrame({'Feature': shap_res['features'], 'Mean |SHAP|': mean_abs}).sort_values('Mean |SHAP|', ascending=False)
+                    st.dataframe(shap_df)
+                    fig, ax = plt.subplots(figsize=(7, 4))
+                    ax.barh(shap_df['Feature'], shap_df['Mean |SHAP|'], color='steelblue', edgecolor='black')
+                    style_axis(ax, 'Mean |SHAP|', 'Feature'); st.pyplot(fig); plt.close(fig)
+                st.subheader("Residual diagnostics")
+                try:
+                    y_pred = res['model'].predict(res['X']); resid = res['y'] - y_pred
+                    c1, c2 = st.columns(2)
+                    fig1, ax1 = plt.subplots(figsize=(5, 4))
+                    ax1.scatter(y_pred, resid, alpha=0.6, s=30, edgecolors='black'); ax1.axhline(0, color='red', ls='--')
+                    style_axis(ax1, 'Fitted', 'Residual'); c1.pyplot(fig1); plt.close(fig1)
+                    fig2, ax2 = plt.subplots(figsize=(5, 4))
+                    stats.probplot(resid, dist='norm', plot=ax2); ax2.set_title('QQ plot')
+                    c2.pyplot(fig2); plt.close(fig2)
+                except: pass
+            else: st.warning("Elastic Net failed")
+        st.markdown("---"); st.subheader("Bootstrap CI for Elastic Net coefficients")
+        if st.button("Bootstrap coefficients", key='boot_btn') and features:
+            with st.spinner("Bootstrapping (500 iterations)..."):
+                res = bootstrap_en_coefs(df_f, target, features)
+            if res:
+                fig = plot_bootstrap_coefs(res['samples'], res['cols'])
+                if fig: st.pyplot(fig); plt.close(fig)
+                ci_df = pd.DataFrame({'Feature': res['cols'], 'Mean': res['mean'],
+                                      'CI_lower': res['ci_lower'], 'CI_upper': res['ci_upper']})
+                st.dataframe(ci_df.style.format(precision=4))
+            else: st.warning("Bootstrap failed (need n >= 3*features)")
+        st.markdown("---"); st.subheader("GAM / splines")
+        if PYGAM_OK and st.button("Fit GAM (pygam)", key='gam_btn') and features:
+            res = run_gam(df_f, target, features)
+            if res:
+                for i, f in enumerate(res['cols']):
+                    try:
+                        fig = plot_gam_fit(res['X'], res['y'], res['model'], i, f)
+                        if fig: st.pyplot(fig); plt.close(fig)
+                    except: pass
+            else: st.warning("GAM failed")
+        elif not PYGAM_OK and st.button("Fit GAM (statsmodels)", key='gam_sm_btn') and features:
+            if not STATSMODELS_OK: st.warning("Neither pygam nor statsmodels available")
+            else:
+                res = run_gam_statsmodels(df_f, target, features)
+                if res: st.success(f"GAM fitted with statsmodels. n = {res['n']}")
+                else: st.warning("statsmodels GAM failed")
+        st.markdown("---"); st.subheader("PLS regression")
+        if SKLEARN_OK and st.button("Run PLS", key='pls_btn') and features:
+            res = run_pls(df_f, target, features)
+            if res:
+                vip_df = pd.DataFrame({'Feature': res['cols'], 'VIP': res['vip']}).sort_values('VIP', ascending=False)
+                st.dataframe(vip_df)
+                fig, ax = plt.subplots(figsize=(7, 4))
+                ax.barh(vip_df['Feature'], vip_df['VIP'], color='steelblue', edgecolor='black'); ax.axvline(1, color='red', ls='--')
+                style_axis(ax, 'VIP score', 'Feature'); st.pyplot(fig); plt.close(fig)
+            else: st.warning("PLS failed")
+        st.markdown("---"); st.subheader("CCA")
+        if SKLEARN_OK:
+            c1, c2 = st.columns(2)
+            x_cca = c1.multiselect("X block", NUMERIC_DESCRIPTORS, default=['dop_cont', 'ρ, %', 'T sin'], key='cca_x')
+            y_cca = c2.multiselect("Y block", [c for c in TEMP_COLS if c in df_f.columns],
+                                    default=[c for c in TEMP_COLS if c in df_f.columns][:3], key='cca_y')
+            if st.button("Run CCA", key='cca_btn') and len(x_cca) >= 2 and len(y_cca) >= 2:
+                res = run_cca(df_f, x_cca, y_cca)
+                if res: st.pyplot(plot_cca_scores(res['x_scores'], res['y_scores']))
+                else: st.warning("CCA failed")
+
+    with tabs[6]:
+        st.header("🔬 Interactions & Sensitivity")
+        st.subheader("Interaction plot")
+        c1, c2, c3 = st.columns(3)
+        x_int = c1.selectbox("X", ['dop_cont', 'x, wt%', 'T sin', 'ρ, %', 'd, mkm'], key='int_x')
+        y_int = c2.selectbox("Y", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='int_y')
+        g_int = c3.selectbox("Group", list(FILTER_LABELS.keys()), key='int_g')
+        log_y = st.checkbox("log Y", key='int_logy')
+        if st.button("Generate", key='int_btn'):
+            try:
+                fig = plot_interaction(df_f, x_int, y_int, g_int, log_y)
+                if fig: st.pyplot(fig); plt.close(fig)
+            except Exception as e: st.error(f"Error: {e}")
+        st.markdown("---"); st.subheader("PDP / ALE")
+        if SKLEARN_OK:
+            features_pdp = st.multiselect("Model features", NUMERIC_DESCRIPTORS + ['is_additive'],
+                                           default=['is_additive', 'ρ, %', 'T sin'], key='pdp_f')
+            target_pdp = st.selectbox("Target", ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns], key='pdp_t')
+            if st.button("Compute 1D PDP/ALE", key='pdp_btn') and features_pdp:
+                try:
+                    d = df_f[features_pdp + [target_pdp]].dropna()
+                    if len(d) >= 20:
+                        m = GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=3)
+                        m.fit(d[features_pdp], d[target_pdp])
+                        for i, f in enumerate(features_pdp):
+                            fig = plot_pdp_1d(m, d[features_pdp].values, i, f)
+                            if fig: st.pyplot(fig); plt.close(fig)
+                            ale = compute_ale(m, d[features_pdp].values, i)
+                            if ale:
+                                fig = plot_ale(ale['grid'], ale['ale'], f)
+                                if fig: st.pyplot(fig); plt.close(fig)
+                    else: st.warning("Need n >= 20")
+                except Exception as e: st.error(f"Error: {e}")
+            c1, c2 = st.columns(2)
+            if features_pdp and len(features_pdp) >= 2:
+                f1 = c1.selectbox("Feature 1", features_pdp, key='pdp2_f1')
+                f2 = c2.selectbox("Feature 2", features_pdp, index=min(1, len(features_pdp)-1), key='pdp2_f2')
+                if st.button("Compute 2D PDP/ALE", key='pdp2_btn') and f1 != f2:
+                    try:
+                        d = df_f[features_pdp + [target_pdp]].dropna()
+                        if len(d) >= 20:
+                            m = GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=3)
+                            m.fit(d[features_pdp], d[target_pdp])
+                            i1 = features_pdp.index(f1); i2 = features_pdp.index(f2)
+                            fig = plot_pdp_2d(m, d[features_pdp].values, (i1, i2), [f1, f2])
+                            if fig: st.pyplot(fig); plt.close(fig)
+                            fig = compute_ale_2d(m, d[features_pdp].values, (i1, i2))
+                            if fig: st.pyplot(fig); plt.close(fig)
+                        else: st.warning("Need n >= 20")
+                    except Exception as e: st.error(f"Error: {e}")
+        st.markdown("---"); st.subheader("Friedman H (pairwise interactions)")
+        if SKLEARN_OK and st.button("Compute Friedman H", key='fh_btn'):
+            try:
+                d = df_f[NUMERIC_DESCRIPTORS + ['Ea_final']].dropna()
+                if len(d) >= 20:
+                    m = GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=3)
+                    m.fit(d[NUMERIC_DESCRIPTORS], d['Ea_final'])
+                    pairs, hs = [], []
+                    for i in range(min(4, len(NUMERIC_DESCRIPTORS))):
+                        for j in range(i+1, min(4, len(NUMERIC_DESCRIPTORS))):
+                            h = compute_friedman_H(m, d[NUMERIC_DESCRIPTORS].values, (i, j))
+                            if h is not None:
+                                pairs.append((NUMERIC_DESCRIPTORS[i], NUMERIC_DESCRIPTORS[j]))
+                                hs.append(h)
+                    if pairs:
+                        fig = plot_friedman_H(pairs, hs)
+                        if fig: st.pyplot(fig); plt.close(fig)
+                    else: st.warning("Friedman H computation failed")
+                else: st.warning("Need n >= 20")
+            except Exception as e: st.error(f"Error: {e}")
+        st.markdown("---"); st.subheader("Sobol variance decomposition")
+        if st.button("Compute Sobol", key='sb_btn'):
+            with st.spinner("Computing Sobol indices..."):
+                res = run_sobol(df_f, 'Ea_final', NUMERIC_DESCRIPTORS)
+            if res is not None:
+                st.info(f"Method: {res['method']}")
+                df_res = res['df']
+                st.dataframe(df_res.style.format(precision=4))
+                col = 'ST' if 'ST' in df_res.columns else 'ST_approx'
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.barh(df_res['Variable'], df_res[col], color='steelblue', edgecolor='black')
+                style_axis(ax, f'{col} index', 'Variable'); st.pyplot(fig); plt.close(fig)
+            else: st.warning("Sobol computation failed")
+
+    with tabs[7]:
+        st.header("🌡️ σ(T) Curve Analysis")
+        st.subheader("Clustering")
+        n_cl = st.slider("Clusters", 2, 6, 3, key='cv_ncl')
+        if st.button("Cluster curves", key='cv_btn'):
+            res = run_curve_clustering(df_f, n_cl)
+            if res:
+                st.pyplot(plot_curve_clusters(res['curves'], res['labels'], res['centroids']))
+                cluster_df = pd.DataFrame({'cluster': res['labels']}, index=res['valid_index'])
+                merged = df_f.loc[res['valid_index']].join(cluster_df)
+                if 'Sintering additive' in merged.columns:
+                    st.subheader("Additive distribution per cluster")
+                    st.dataframe(pd.crosstab(merged['cluster'], merged['Sintering additive']))
+                mean_cols = [c for c in ['Ea_LT', 'Ea_HT', 'Ea_diff', 'knee_T', 'sigma_500'] if c in merged.columns]
+                if mean_cols: st.dataframe(merged.groupby('cluster')[mean_cols].mean())
+            else: st.warning("Clustering failed")
+        st.markdown("---"); st.subheader("FPCA")
+        if st.button("Run FPCA", key='fpca_btn'):
+            res = run_fpca(df_f, n_components=3)
+            if res:
+                st.info(f"Method: {res['method']}")
+                st.pyplot(plot_fpca_components(res['components'], res['explained'], res['T_vals']))
+                st.info("Explained variance: " + ", ".join([f"FPC{i+1}={r*100:.1f}%" for i, r in enumerate(res['explained'][:3])]))
+                scores_df = pd.DataFrame(res['scores'], index=res['valid_index'])
+                st.dataframe(scores_df.head(20))
+            else: st.warning("FPCA failed")
+        st.markdown("---"); st.subheader("Segmented regression (Ea per segment)")
+        c1, c2 = st.columns(2)
+        if c1.button("Batch segmented regression (all curves)", key='seg_batch_btn'):
+            try:
+                res = run_segmented_regression_batch(df_f, n_segments=2)
+                if res is not None and len(res) > 0:
+                    st.dataframe(res)
+                    fig, ax = plt.subplots(figsize=(7, 4))
+                    ax.hist(res['T_C'].dropna(), bins=20, edgecolor='black', color='steelblue')
+                    style_axis(ax, 'Breakpoint T (°C)', 'Count'); ax.set_title('Breakpoint distribution')
+                    st.pyplot(fig); plt.close(fig)
+                    st.download_button("📥 Download breakpoints (TSV)", res.to_csv(sep='\t', index=False),
+                                        file_name="breakpoints.tsv", mime="text/tab-separated-values")
+                else: st.warning("Batch failed")
+            except Exception as e: st.error(f"Error: {e}")
+        if c2.button("Single-curve segmented regression", key='seg_btn'):
+            try:
+                curves = df_f[TEMP_COLS].values.astype(float)
+                valid = np.array([np.isfinite(c).sum() >= 3 and np.all(np.where(np.isfinite(c), c > 0, True)) for c in curves])
+                if valid.sum() >= 5:
+                    vc = curves[valid][0]
+                    T_vals = np.array(TEMP_VALUES)
+                    mask = np.isfinite(vc) & (vc > 0)
+                    x_arr = 1000 / (T_vals[mask] + 273.15)
+                    y_arr = np.log(vc[mask] * (T_vals[mask] + 273.15))
+                    res = run_segmented_regression(x_arr, y_arr)
+                    if res and 'breakpoints' in res:
+                        bp = res['breakpoints'][0]
+                        seg1 = res.get('seg1_params'); seg2 = res.get('seg2_params')
+                        if seg1 is not None and seg2 is not None:
+                            fig = plot_segmented_regression(x_arr, y_arr, bp, seg1, seg2, '1000/T', 'log(σT)')
+                            if fig: st.pyplot(fig); plt.close(fig)
+                            st.info(f"Breakpoint at 1000/T = {bp:.4f} (T ≈ {1000/bp - 273.15:.0f} °C)")
+                        else: st.info(f"Breakpoint at 1000/T = {bp:.4f}")
+                else: st.warning("Insufficient valid curves")
+            except Exception as e: st.error(f"Error: {e}")
+        st.markdown("---"); st.subheader("Scalar curve features")
+        feature_cols = [c for c in ['Ea_LT', 'Ea_HT', 'Ea_diff', 'sigma_500', 'sigma_ratio', 'knee_T', 'curve_area'] if c in df_f.columns]
+        if feature_cols:
+            st.dataframe(df_f[feature_cols].describe())
+            if 'Sintering additive' in df_f.columns:
+                st.dataframe(df_f.groupby('Sintering additive')[feature_cols].mean())
+            st.download_button("📥 Download curve features (TSV)", df_f[feature_cols].to_csv(sep='\t'),
+                                file_name="curve_features.tsv", mime="text/tab-separated-values")
+
+    with tabs[8]:
+        st.header("🎯 Additive vs Pure — Conditional Effect Analysis")
+        if 'Sintering additive' not in df_f.columns or 'References' not in df_f.columns:
+            st.warning("Need 'Sintering additive' and 'References' columns")
+        else:
+            st.subheader("1) Matched pairs within Reference")
+            match_on = st.multiselect("Match on", ['ρ, %', 'T sin'], default=['ρ, %'], key='ap_match')
+            method = st.selectbox("Matching method", ['Nearest neighbor', 'CEM (canonical, quantile bins)'], key='ap_method')
+            n_bins_cem = 5
+            if method.startswith('CEM'):
+                n_bins_cem = st.slider("CEM quantile bins", 2, 10, 5, key='ap_cembins')
+            if st.button("Build matched pairs", key='ap_btn1'):
+                if method.startswith('CEM'):
+                    pairs = run_cem_matching(df_f, 'References', match_on=match_on, n_bins=n_bins_cem)
+                else:
+                    pairs = match_pairs_by(df_f, 'References', match_on=match_on)
+                if pairs is not None and len(pairs) > 0:
+                    st.success(f"Found {len(pairs)} matched pairs")
+                    pairs_ext = []
+                    for _, pr in pairs.iterrows():
+                        try:
+                            a = df_f.loc[pr['add_idx']]; p = df_f.loc[pr['ref_idx']]
+                            pairs_ext.append({
+                                'Reference': pr['Reference'], 'Additive': pr['Additive'],
+                                'Ea_additive': a.get('Ea_final'), 'Ea_pure': p.get('Ea_final'),
+                                'ΔEa': a.get('Ea_final', np.nan) - p.get('Ea_final', np.nan),
+                                'ρ_additive': a.get('ρ, %', np.nan), 'ρ_pure': p.get('ρ, %', np.nan),
+                                'Δρ': a.get('ρ, %', np.nan) - p.get('ρ, %', np.nan),
+                                'Tsin_additive': a.get('T sin', np.nan), 'Tsin_pure': p.get('T sin', np.nan),
+                                'ΔTsin': a.get('T sin', np.nan) - p.get('T sin', np.nan),
+                                'match_dist': pr.get('match_dist', 0.0)
+                            })
+                        except: pass
+                    pairs_df = pd.DataFrame(pairs_ext)
+                    st.dataframe(pairs_df)
+                    st.download_button("📥 Download (TSV)", pairs_df.to_csv(sep='\t', index=False),
+                                        file_name="matched_pairs.tsv", mime="text/tab-separated-values")
+                    st.session_state['pairs_df'] = pairs_df
+                else: st.warning("No matched pairs")
+            if 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0:
+                pairs_df = st.session_state['pairs_df']
+                st.markdown("**Paired ΔEa test**")
+                try:
+                    t, p = stats.wilcoxon(pairs_df['ΔEa'].dropna())
+                    st.success(f"Wilcoxon: W = {t:.3f}, p = {p:.3g}, n = {pairs_df['ΔEa'].notna().sum()}")
+                    st.info(f"Mean ΔEa = {pairs_df['ΔEa'].mean():.4f} eV, median = {pairs_df['ΔEa'].median():.4f} eV")
+                except: st.warning("Paired test failed")
+            st.markdown("---"); st.subheader("2) Density-matched vs Unmatched")
+            if 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0:
+                pdf = st.session_state['pairs_df']
+                matched = pdf[pdf['match_dist'] < pdf['match_dist'].median()]
+                unmatched = pdf[pdf['match_dist'] >= pdf['match_dist'].median()]
+                c1, c2 = st.columns(2)
+                c1.metric("Density-matched ΔEa", f"{matched['ΔEa'].mean():.4f}" if len(matched) else "n/a")
+                c2.metric("Unmatched ΔEa", f"{unmatched['ΔEa'].mean():.4f}" if len(unmatched) else "n/a")
+                if len(matched) > 2 and len(unmatched) > 2:
+                    try:
+                        _, pu = stats.mannwhitneyu(matched['ΔEa'].dropna(), unmatched['ΔEa'].dropna(), alternative='two-sided')
+                        st.success(f"Difference: p = {pu:.3g}")
+                    except: pass
+            st.markdown("---"); st.subheader("3) Mediation analysis")
+            if 'is_additive' in df_f.columns and 'ρ, %' in df_f.columns:
+                try:
+                    res = run_mediation(df_f[['is_additive', 'ρ, %', 'Ea_final']].dropna(), 'is_additive', 'ρ, %', 'Ea_final')
+                    if res:
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Total effect", f"{res['total']:.4f}")
+                        c2.metric("Direct effect", f"{res['direct']:.4f}")
+                        c3.metric("Indirect (via density)", f"{res['indirect']:.4f}")
+                        st.markdown(f"a-path = {res['a_path']:.4f}, b-path = {res['b_path']:.4f}")
+                        st.markdown(f"p(total) = {res['p_total']:.3g}, p(direct) = {res['p_direct']:.3g}, n = {res['n']}")
+                        try:
+                            fig = plot_meditation_diagram(res['total'], res['direct'], res['indirect'],
+                                                          res['a_path'], res['b_path'], res['p_total'], res['p_direct'])
+                            if fig: st.pyplot(fig); plt.close(fig)
+                        except: pass
+                    else: st.warning("Need n >= 15")
+                except Exception as e: st.error(f"Error: {e}")
+            st.markdown("---"); st.subheader("4) Interaction: additive × density")
+            if 'is_additive' in df_f.columns and 'ρ, %' in df_f.columns:
+                try:
+                    dint = df_f[['is_additive', 'ρ, %', 'Ea_final', 'T sin']].dropna()
+                    if len(dint) >= 20:
+                        dint = dint.copy()
+                        dint['rho_c'] = dint['ρ, %'] - dint['ρ, %'].mean()
+                        dint['tsin_c'] = dint['T sin'] - dint['T sin'].mean()
+                        dint['inter'] = dint['is_additive'] * dint['rho_c']
+                        X = dint[['is_additive', 'rho_c', 'tsin_c', 'inter']].values
+                        y = dint['Ea_final'].values
+                        Xd = np.column_stack([np.ones(len(X)), X])
+                        coef, _, _, _ = np.linalg.lstsq(Xd, y, rcond=None)
+                        resid = y - Xd @ coef; dof = len(y) - Xd.shape[1]
+                        sse = np.sum(resid**2)
+                        cov = sse / dof * np.linalg.inv(Xd.T @ Xd)
+                        se = np.sqrt(np.diag(cov))
+                        t_stat = coef[4] / se[4] if se[4] > 0 else 0
+                        p_int = 2 * (1 - stats.t.cdf(abs(t_stat), dof))
+                        st.markdown(f"**Interaction β (additive × density):** {coef[4]:.4f}, SE = {se[4]:.4f}, p = {p_int:.3g}")
+                        st.markdown(f"**Main effect (additive):** {coef[1]:.4f}, p = {2*(1-stats.t.cdf(abs(coef[1]/se[1]), dof)):.3g}")
+                        st.markdown(f"**Main effect (density):** {coef[2]:.4f}, p = {2*(1-stats.t.cdf(abs(coef[2]/se[2]), dof)):.3g}")
+                        fig, ax = plt.subplots(figsize=(8, 5))
+                        for grp, color, label in [(0, 'steelblue', 'Pure'), (1, 'darkorange', 'With additive')]:
+                            sub = dint[dint['is_additive'] == grp]
+                            if len(sub) > 0:
+                                ax.scatter(sub['ρ, %'], sub['Ea_final'], color=color, alpha=0.6, s=40,
+                                           edgecolors='black', label=label)
+                                try:
+                                    z = np.polyfit(sub['ρ, %'], sub['Ea_final'], 1)
+                                    xx = np.linspace(sub['ρ, %'].min(), sub['ρ, %'].max(), 20)
+                                    ax.plot(xx, np.polyval(z, xx), color=color, lw=2)
+                                except: pass
+                        style_axis(ax, 'Density (%)', 'Ea (eV)'); ax.legend()
+                        st.pyplot(fig); plt.close(fig)
+                    else: st.warning("Need n >= 20")
+                except Exception as e: st.error(f"Error: {e}")
+            st.markdown("---"); st.subheader("5) Verdict")
+            try:
+                has_pairs = 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0
+                lines = []
+                if has_pairs:
+                    p = st.session_state['pairs_df']
+                    matched = p[p['match_dist'] < p['match_dist'].median()]
+                    unmatched = p[p['match_dist'] >= p['match_dist'].median()]
+                    if len(matched) > 0: lines.append(f"• Density-matched pairs: mean ΔEa = {matched['ΔEa'].mean():.4f} eV (n={len(matched)})")
+                    if len(unmatched) > 0: lines.append(f"• Unmatched pairs: mean ΔEa = {unmatched['ΔEa'].mean():.4f} eV (n={len(unmatched)})")
+                    if len(matched) > 0 and len(unmatched) > 0:
+                        if matched['ΔEa'].mean() > 0 and unmatched['ΔEa'].mean() < 0:
+                            lines.append("→ Supports 'conditional / compromise' interpretation: additive beneficial only via density gain")
+                        elif matched['ΔEa'].mean() < 0 and unmatched['ΔEa'].mean() < 0:
+                            lines.append("→ Additive uniformly harmful (direct effect dominates)")
+                        elif matched['ΔEa'].mean() > 0 and unmatched['ΔEa'].mean() > 0:
+                            lines.append("→ Additive uniformly beneficial (direct effect dominates)")
+                if lines:
+                    for ln in lines: st.markdown(ln)
+                else: st.info("Run matched pairs analysis to generate a verdict")
+            except Exception as e: st.error(f"Error: {e}")
+
+    with tabs[9]:
+        st.header("📋 Data & Export")
+        st.subheader("Filtered data with all derived features")
+        st.dataframe(df_f)
+        st.download_button("📥 Download full filtered data (TSV)", df_f.to_csv(sep='\t', index=False),
+                            file_name="filtered_data.tsv", mime="text/tab-separated-values")
+        st.subheader("Summary statistics")
+        st.dataframe(df_f.select_dtypes(include=[np.number]).describe())
 
 if __name__ == "__main__":
     main()
