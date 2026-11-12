@@ -267,7 +267,7 @@ def compute_curve_features_cached(df_hash, df):
             d1 = np.gradient(kernel(tg), tg)
             feats.loc[idx, 'knee_T'] = tg[np.argmax(np.abs(d1))]
         except: pass
-        feats.loc[idx, 'curve_area'] = np.trapz(np.log(v), t) if len(v) > 1 else np.nan
+        feats.loc[idx, 'curve_area'] = np.trapezoid(np.log(v), t) if len(v) > 1 else np.nan
     return feats
 
 # ============================================
