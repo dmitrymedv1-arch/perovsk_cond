@@ -12,3 +12,11 @@ openpyxl
 shap
 xgboost
 umap-learn
+statsmodels
+prince              # канонический FAMD (без него — PCA-fallback)
+pygam               # канонический GAM (без него — statsmodels fallback)
+SALib               # канонический Sobol (без него — binning+permutation fallback)
+scikit-fda          # канонический FPCA (без него — spline-PCA fallback)
+pwlf                # канонический segmented regression (без него — grid-search fallback)
+dcor                # канонический distance correlation (без него — manual fallback)
+umap-learn          # уже есть (UMAP)
