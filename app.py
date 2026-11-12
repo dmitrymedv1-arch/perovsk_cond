@@ -118,7 +118,11 @@ COLOR_PALETTES = {
     'Viridis': 'viridis', 'Plasma': 'plasma', 'Inferno': 'inferno',
     'Magma': 'magma', 'Cividis': 'cividis', 'Turbo': 'turbo',
     'Jet': 'jet', 'Rainbow': 'rainbow', 'Spectral': 'Spectral',
-    'Coolwarm': 'coolwarm'
+    'Coolwarm': 'coolwarm',
+    'Blues': 'Blues', 'Greens': 'Greens', 'Oranges': 'Oranges',
+    'Purples': 'Purples', 'Reds': 'Reds',
+    'YlGnBu': 'YlGnBu', 'YlOrRd': 'YlOrRd', 'PuBuGn': 'PuBuGn',
+    'RdYlBu_r': 'RdYlBu_r', 'RdYlGn_r': 'RdYlGn_r'
 }
 
 COLUMN_LABELS = {
@@ -2712,7 +2716,11 @@ def main():
                                                                 'd_ratio': 'd_additive/d_Pure'}[x],
                                         index=0, key='ap_heat')
             c1, c2, c3 = st.columns(3)
-            pal_ap = c1.selectbox("Palette", list(COLOR_PALETTES.keys()), key='ap_pal')
+            _ap_pal_default = 'YlOrRd' if 'YlOrRd' in COLOR_PALETTES else 'Viridis'
+            _ap_pal_idx = list(COLOR_PALETTES.keys()).index(_ap_pal_default)
+            pal_ap = c1.selectbox("Palette", list(COLOR_PALETTES.keys()),
+                                   index=_ap_pal_idx, key='ap_pal',
+                                   help="Sequential or 3-gradient schemes are recommended — small |Δ| values will appear light, not dark.")
             additive_filter = c2.multiselect("Filter additives", sorted([a for a in df_f['Sintering additive'].dropna().unique() if a != 'Pure']),
                                               default=[], key='ap_addfilter',
                                               help="Leave empty to show all")
