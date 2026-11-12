@@ -1199,7 +1199,7 @@ def plot_additive_vs_pure(pairs_df, y_scale='log10', heat_metric='abs_delta_rho'
 
     handles, labels = axes_list[0].get_legend_handles_labels()
     if handles:
-        axes_list[0].legend(handles, labels, loc='upper right', fontsize=8,
+        axes_list[0].legend(handles, labels, loc='upper right', fontsize=10,
                             frameon=True, framealpha=0.7)
 
     if has_heat:
