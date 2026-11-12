@@ -31,7 +31,7 @@ try:
     from sklearn.manifold import TSNE
     from sklearn.feature_selection import mutual_info_regression
     SKLEARN_OK = True
-except ImportError:
+except Exception:
     SKLEARN_OK = False
 
 try:
@@ -39,63 +39,63 @@ try:
     import statsmodels.formula.api as smf
     from statsmodels.stats.multicomp import pairwise_tukeyhsd
     STATSMODELS_OK = True
-except ImportError:
+except Exception:
     STATSMODELS_OK = False
 
 try:
     import shap
     SHAP_OK = True
-except ImportError:
+except Exception:
     SHAP_OK = False
 
 try:
     from umap import UMAP
     UMAP_OK = True
-except ImportError:
+except Exception:
     UMAP_OK = False
 
 try:
     import prince
     PRINCE_OK = True
-except ImportError:
+except Exception:
     PRINCE_OK = False
 
 try:
     from pygam import LinearGAM, s as gam_s
     PYGAM_OK = True
-except ImportError:
+except Exception:
     PYGAM_OK = False
 
 try:
     from SALib.sample import saltelli as sobol_saltelli
     from SALib.analyze import sobol as sobol_analyze
     SALIB_OK = True
-except ImportError:
+except Exception:
     SALIB_OK = False
 
 try:
     from skfda.preprocessing.dim_reduction import FPCA as skfda_FPCA
     from skfda.representation import FDataGrid
     SKFDA_OK = True
-except ImportError:
+except Exception:
     SKFDA_OK = False
 
 try:
     import pwlf
     PWLE_OK = True
-except ImportError:
+except Exception:
     PWLE_OK = False
 
 try:
     import dcor
     DCOR_OK = True
-except ImportError:
+except Exception:
     DCOR_OK = False
 
 try:
     import plotly.graph_objects as go
     PLOTLY_OK = True
-except ImportError:
+except Exception:
     PLOTLY_OK = False
 
 # ============================================
