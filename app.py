@@ -1693,7 +1693,7 @@ def run_cem_matching(df, ref_col, match_on=('ρ, %', 'T sin'), n_bins=5):
                          'ref_idx': match_idx, 'add_idx': a.name, 'match_dist': 0.0, 'bin': b})
     return pd.DataFrame(rows) if rows else None
 
-def run_meta_forest(df, ref_col, y_col='Ea_final', treatment_group='Pure'):
+def run_meta_forest(df, ref_col, y_col='σ total, 600', treatment_group='Pure'):
     """Per-reference effect of each additive vs Pure (mean diff + CI)."""
     if 'Sintering additive' not in df.columns: return None
     rows = []
@@ -2351,6 +2351,28 @@ def main():
         if 'Sintering additive' not in df_f.columns or 'References' not in df_f.columns:
             st.warning("Need 'Sintering additive' and 'References' columns")
         else:
+            _transport_opts = [c for c in TEMP_COLS if c in df_f.columns] + ['Ea_final']
+            _default_transport = 'σ total, 600' if 'σ total, 600' in df_f.columns else ('Ea_final' if 'Ea_final' in df_f.columns else _transport_opts[0])
+            y_transport = st.selectbox(
+                "Transport metric for comparison",
+                options=_transport_opts,
+                index=_transport_opts.index(_default_transport) if _default_transport in _transport_opts else 0,
+                key='ap_transport_metric',
+                help="Primary outcome for matched-pairs, mediation, interaction and verdict. "
+                     "σ at a working temperature is recommended; Ea is shown as a secondary (mechanism) outcome."
+            )
+            _is_sigma = y_transport in TEMP_COLS
+            if _is_sigma:
+                y_transport_label = y_transport.replace('σ total, ', 'σ at ') + ' °C (mS/cm)'
+                y_transport_log = st.checkbox("Use log10(σ) for paired/mediation analysis",
+                                              value=True, key='ap_transport_log',
+                                              help="Conductivity spans orders of magnitude — log10 is statistically appropriate.")
+            else:
+                y_transport_label = 'Ea (eV)'
+                y_transport_log = False
+            st.caption(f"Primary outcome: **{y_transport_label}**"
+                       + (f"  |  log10 transform: **{'on' if y_transport_log else 'off'}**" if _is_sigma else "")
+                       + "  |  Secondary outcome (mechanism): **Ea_final**")
             st.subheader("1) Matched pairs within Reference")
             match_on = st.multiselect("Match on", ['ρ, %', 'T sin'], default=['ρ, %'], key='ap_match')
             method = st.selectbox("Matching method", ['Nearest neighbor', 'CEM (canonical, quantile bins)'], key='ap_method')
@@ -2368,9 +2390,18 @@ def main():
                     for _, pr in pairs.iterrows():
                         try:
                             a = df_f.loc[pr['add_idx']]; p = df_f.loc[pr['ref_idx']]
+                            y_a = a.get(y_transport, np.nan); y_p = p.get(y_transport, np.nan)
+                            if _is_sigma and y_transport_log:
+                                y_a_t = np.log10(y_a) if pd.notna(y_a) and y_a > 0 else np.nan
+                                y_p_t = np.log10(y_p) if pd.notna(y_p) and y_p > 0 else np.nan
+                            else:
+                                y_a_t, y_p_t = y_a, y_p
                             pairs_ext.append({
                                 'Reference': pr['Reference'], 'Additive': pr['Additive'],
-                                'Ea_additive': a.get('Ea_final'), 'Ea_pure': p.get('Ea_final'),
+                                'Y_additive': y_a, 'Y_pure': y_p,
+                                'ΔY_raw': (y_a - y_p) if pd.notna(y_a) and pd.notna(y_p) else np.nan,
+                                'ΔY_transformed': (y_a_t - y_p_t) if pd.notna(y_a_t) and pd.notna(y_p_t) else np.nan,
+                                'Ea_additive': a.get('Ea_final', np.nan), 'Ea_pure': p.get('Ea_final', np.nan),
                                 'ΔEa': a.get('Ea_final', np.nan) - p.get('Ea_final', np.nan),
                                 'ρ_additive': a.get('ρ, %', np.nan), 'ρ_pure': p.get('ρ, %', np.nan),
                                 'Δρ': a.get('ρ, %', np.nan) - p.get('ρ, %', np.nan),
@@ -2387,36 +2418,73 @@ def main():
                 else: st.warning("No matched pairs")
             if 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0:
                 pairs_df = st.session_state['pairs_df']
-                st.markdown("**Paired ΔEa test**")
+                st.markdown(f"**Paired Δ test — primary outcome: {y_transport_label}**")
+                try:
+                    col_name = 'ΔY_transformed' if (_is_sigma and y_transport_log) else 'ΔY_raw'
+                    d_paired = pairs_df[col_name].dropna()
+                    if len(d_paired) >= 3:
+                        t, p = stats.wilcoxon(d_paired)
+                        st.success(f"Wilcoxon (paired): W = {t:.3f}, p = {p:.3g}, n = {len(d_paired)}")
+                        st.info(f"Mean Δ = {d_paired.mean():.4f}, median = {d_paired.median():.4f}"
+                                + (f" (in log10 units)" if _is_sigma and y_transport_log else ""))
+                        if _is_sigma and y_transport_log:
+                            st.caption(f"Mean fold-change = {10**d_paired.mean():.3f}× "
+                                       f"(additive vs Pure at matched density/Tsin)")
+                    else:
+                        st.warning("Not enough valid pairs for primary outcome")
+                except Exception as e:
+                    st.warning(f"Paired test (primary) failed: {e}")
+                st.markdown("**Paired ΔEa test (secondary, mechanism)**")
                 try:
                     t, p = stats.wilcoxon(pairs_df['ΔEa'].dropna())
-                    st.success(f"Wilcoxon: W = {t:.3f}, p = {p:.3g}, n = {pairs_df['ΔEa'].notna().sum()}")
+                    st.success(f"Wilcoxon (paired): W = {t:.3f}, p = {p:.3g}, n = {pairs_df['ΔEa'].notna().sum()}")
                     st.info(f"Mean ΔEa = {pairs_df['ΔEa'].mean():.4f} eV, median = {pairs_df['ΔEa'].median():.4f} eV")
-                except: st.warning("Paired test failed")
+                except: st.warning("Paired ΔEa test failed")
             st.markdown("---"); st.subheader("2) Density-matched vs Unmatched")
             if 'pairs_df' in st.session_state and len(st.session_state['pairs_df']) > 0:
                 pdf = st.session_state['pairs_df']
                 matched = pdf[pdf['match_dist'] < pdf['match_dist'].median()]
                 unmatched = pdf[pdf['match_dist'] >= pdf['match_dist'].median()]
+                _delta_col = 'ΔY_transformed' if (_is_sigma and y_transport_log) else 'ΔY_raw'
                 c1, c2 = st.columns(2)
-                c1.metric("Density-matched ΔEa", f"{matched['ΔEa'].mean():.4f}" if len(matched) else "n/a")
-                c2.metric("Unmatched ΔEa", f"{unmatched['ΔEa'].mean():.4f}" if len(unmatched) else "n/a")
+                c1.metric(f"Density-matched Δ ({y_transport_label})",
+                          f"{matched[_delta_col].mean():.4f}" if len(matched) else "n/a")
+                c2.metric(f"Unmatched Δ ({y_transport_label})",
+                          f"{unmatched[_delta_col].mean():.4f}" if len(unmatched) else "n/a")
                 if len(matched) > 2 and len(unmatched) > 2:
                     try:
-                        _, pu = stats.mannwhitneyu(matched['ΔEa'].dropna(), unmatched['ΔEa'].dropna(), alternative='two-sided')
-                        st.success(f"Difference: p = {pu:.3g}")
+                        _, pu = stats.mannwhitneyu(matched[_delta_col].dropna(),
+                                                   unmatched[_delta_col].dropna(), alternative='two-sided')
+                        st.success(f"Difference between matched/unmatched: p = {pu:.3g}")
                     except: pass
+                if 'ΔEa' in pdf.columns:
+                    st.markdown("**Same split, but for ΔEa (secondary outcome):**")
+                    c1, c2 = st.columns(2)
+                    c1.metric("Density-matched ΔEa", f"{matched['ΔEa'].mean():.4f}" if len(matched) else "n/a")
+                    c2.metric("Unmatched ΔEa", f"{unmatched['ΔEa'].mean():.4f}" if len(unmatched) else "n/a")
             st.markdown("---"); st.subheader("3) Mediation analysis")
             if 'is_additive' in df_f.columns and 'ρ, %' in df_f.columns:
                 try:
-                    res = run_mediation(df_f[['is_additive', 'ρ, %', 'Ea_final']].dropna(), 'is_additive', 'ρ, %', 'Ea_final')
+                    _med_df = df_f[['is_additive', 'ρ, %', y_transport]].dropna().copy()
+                    _outcome_for_mediation = y_transport
+                    if _is_sigma and y_transport_log:
+                        _med_df = _med_df[_med_df[y_transport] > 0].copy()
+                        _med_df['_logY'] = np.log10(_med_df[y_transport])
+                        _outcome_for_mediation = '_logY'
+                    res = run_mediation(_med_df, 'is_additive', 'ρ, %', _outcome_for_mediation)
                     if res:
+                        st.caption(f"Outcome: **{y_transport_label}**"
+                                   + (" (log10)" if _is_sigma and y_transport_log else "")
+                                   + "  |  Mediator: **Density (%)**  |  Treatment: **is_additive**")
                         c1, c2, c3 = st.columns(3)
                         c1.metric("Total effect", f"{res['total']:.4f}")
                         c2.metric("Direct effect", f"{res['direct']:.4f}")
                         c3.metric("Indirect (via density)", f"{res['indirect']:.4f}")
                         st.markdown(f"a-path = {res['a_path']:.4f}, b-path = {res['b_path']:.4f}")
                         st.markdown(f"p(total) = {res['p_total']:.3g}, p(direct) = {res['p_direct']:.3g}, n = {res['n']}")
+                        if _is_sigma and y_transport_log:
+                            st.caption(f"In log10 units — indirect effect corresponds to ×{10**res['indirect']:.3f} "
+                                       f"fold-change in σ from density gain alone.")
                         try:
                             fig = plot_meditation_diagram(res['total'], res['direct'], res['indirect'],
                                                           res['a_path'], res['b_path'], res['p_total'], res['p_direct'])
@@ -2427,14 +2495,20 @@ def main():
             st.markdown("---"); st.subheader("4) Interaction: additive × density")
             if 'is_additive' in df_f.columns and 'ρ, %' in df_f.columns:
                 try:
-                    dint = df_f[['is_additive', 'ρ, %', 'Ea_final', 'T sin']].dropna()
+                    _int_df = df_f[['is_additive', 'ρ, %', y_transport, 'T sin']].dropna().copy()
+                    if _is_sigma and y_transport_log:
+                        _int_df = _int_df[_int_df[y_transport] > 0].copy()
+                        _int_df['_outcome'] = np.log10(_int_df[y_transport])
+                    else:
+                        _int_df['_outcome'] = _int_df[y_transport]
+                    dint = _int_df
                     if len(dint) >= 20:
                         dint = dint.copy()
                         dint['rho_c'] = dint['ρ, %'] - dint['ρ, %'].mean()
                         dint['tsin_c'] = dint['T sin'] - dint['T sin'].mean()
                         dint['inter'] = dint['is_additive'] * dint['rho_c']
                         X = dint[['is_additive', 'rho_c', 'tsin_c', 'inter']].values
-                        y = dint['Ea_final'].values
+                        y = dint['_outcome'].values
                         Xd = np.column_stack([np.ones(len(X)), X])
                         coef, _, _, _ = np.linalg.lstsq(Xd, y, rcond=None)
                         resid = y - Xd @ coef; dof = len(y) - Xd.shape[1]
@@ -2443,6 +2517,8 @@ def main():
                         se = np.sqrt(np.diag(cov))
                         t_stat = coef[4] / se[4] if se[4] > 0 else 0
                         p_int = 2 * (1 - stats.t.cdf(abs(t_stat), dof))
+                        st.caption(f"Outcome: **{y_transport_label}**"
+                                   + (" (log10)" if _is_sigma and y_transport_log else ""))
                         st.markdown(f"**Interaction β (additive × density):** {coef[4]:.4f}, SE = {se[4]:.4f}, p = {p_int:.3g}")
                         st.markdown(f"**Main effect (additive):** {coef[1]:.4f}, p = {2*(1-stats.t.cdf(abs(coef[1]/se[1]), dof)):.3g}")
                         st.markdown(f"**Main effect (density):** {coef[2]:.4f}, p = {2*(1-stats.t.cdf(abs(coef[2]/se[2]), dof)):.3g}")
@@ -2450,14 +2526,15 @@ def main():
                         for grp, color, label in [(0, 'steelblue', 'Pure'), (1, 'darkorange', 'With additive')]:
                             sub = dint[dint['is_additive'] == grp]
                             if len(sub) > 0:
-                                ax.scatter(sub['ρ, %'], sub['Ea_final'], color=color, alpha=0.6, s=40,
+                                ax.scatter(sub['ρ, %'], sub['_outcome'], color=color, alpha=0.6, s=40,
                                            edgecolors='black', label=label)
                                 try:
-                                    z = np.polyfit(sub['ρ, %'], sub['Ea_final'], 1)
+                                    z = np.polyfit(sub['ρ, %'], sub['_outcome'], 1)
                                     xx = np.linspace(sub['ρ, %'].min(), sub['ρ, %'].max(), 20)
                                     ax.plot(xx, np.polyval(z, xx), color=color, lw=2)
                                 except: pass
-                        style_axis(ax, 'Density (%)', 'Ea (eV)'); ax.legend()
+                        style_axis(ax, 'Density (%)', ('log10(' if _is_sigma and y_transport_log else '') + y_transport_label + (')' if _is_sigma and y_transport_log else ''))
+                        ax.legend()
                         st.pyplot(fig); plt.close(fig)
                     else: st.warning("Need n >= 20")
                 except Exception as e: st.error(f"Error: {e}")
@@ -2467,17 +2544,23 @@ def main():
                 lines = []
                 if has_pairs:
                     p = st.session_state['pairs_df']
+                    _delta_col = 'ΔY_transformed' if (_is_sigma and y_transport_log) else 'ΔY_raw'
                     matched = p[p['match_dist'] < p['match_dist'].median()]
                     unmatched = p[p['match_dist'] >= p['match_dist'].median()]
-                    if len(matched) > 0: lines.append(f"• Density-matched pairs: mean ΔEa = {matched['ΔEa'].mean():.4f} eV (n={len(matched)})")
-                    if len(unmatched) > 0: lines.append(f"• Unmatched pairs: mean ΔEa = {unmatched['ΔEa'].mean():.4f} eV (n={len(unmatched)})")
+                    if len(matched) > 0:
+                        lines.append(f"• Density-matched pairs ({y_transport_label}): mean Δ = {matched[_delta_col].mean():.4f} (n={len(matched)})")
+                    if len(unmatched) > 0:
+                        lines.append(f"• Unmatched pairs ({y_transport_label}): mean Δ = {unmatched[_delta_col].mean():.4f} (n={len(unmatched)})")
                     if len(matched) > 0 and len(unmatched) > 0:
-                        if matched['ΔEa'].mean() > 0 and unmatched['ΔEa'].mean() < 0:
+                        m_m, u_m = matched[_delta_col].mean(), unmatched[_delta_col].mean()
+                        if m_m > 0 and u_m < 0:
                             lines.append("→ Supports 'conditional / compromise' interpretation: additive beneficial only via density gain")
-                        elif matched['ΔEa'].mean() < 0 and unmatched['ΔEa'].mean() < 0:
+                        elif m_m < 0 and u_m < 0:
                             lines.append("→ Additive uniformly harmful (direct effect dominates)")
-                        elif matched['ΔEa'].mean() > 0 and unmatched['ΔEa'].mean() > 0:
+                        elif m_m > 0 and u_m > 0:
                             lines.append("→ Additive uniformly beneficial (direct effect dominates)")
+                    if 'ΔEa' in p.columns and p['ΔEa'].notna().any():
+                        lines.append(f"• Secondary (Ea): matched ΔEa = {matched['ΔEa'].mean():.4f} eV; unmatched ΔEa = {unmatched['ΔEa'].mean():.4f} eV")
                 if lines:
                     for ln in lines: st.markdown(ln)
                 else: st.info("Run matched pairs analysis to generate a verdict")
