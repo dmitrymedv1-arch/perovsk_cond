@@ -587,7 +587,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
                            alpha=0.7, edgecolors='black', linewidth=0.5, label=str(cat))
         sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5, visible=False)
         plt.colorbar(sc, ax=ax).set_label(d[color_col].name, fontsize=11, fontweight='bold')
-        leg1 = ax.legend(loc='upper left', bbox_to_anchor=(0.0, 0.88), frameon=True, framealpha=0.5,
+        leg1 = ax.legend(loc='upper left', bbox_to_anchor=(0.8, 0), frameon=True, framealpha=0.5,
                          title=humanize_filter(filter_display_name) + ':' if filter_display_name else 'Category:')
         ax.add_artist(leg1)
     else:
