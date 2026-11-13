@@ -738,7 +738,7 @@ def ternary_to_xy(a, b, c):
     if total == 0: return 0, 0
     return 0.5*(2*b + c)/total, (np.sqrt(3)/2)*c/total
 
-def plot_ternary(df, comp_cols, color_col, palette='viridis', log_color=False):
+def plot_ternary(df, comp_cols, color_col, palette='viridis', or=False):
     comp_cols = [c for c in comp_cols if c in df.columns]
     if len(comp_cols) != 3: return None
     d = df[comp_cols + [color_col]].dropna()
@@ -2279,7 +2279,7 @@ def main():
             log_c = st.checkbox("log Color", key='tr_logc')
             if st.button("Generate", key='tr_btn') and len(comp) == 3:
                 try:
-                    fig = plot_ternary(df_f, comp, color_col, log_col=log_c)
+                    fig = plot_ternary(df_f, comp, color_col, log_color=log_c)
                     if fig: st.pyplot(fig); plt.close(fig)
                 except Exception as e: st.error(f"Error: {e}")
 
