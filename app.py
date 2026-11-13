@@ -2280,7 +2280,7 @@ def main():
             log_c = st.checkbox("log Color", key='tr_logc')
             if st.button("Generate", key='tr_btn') and len(comp) == 3:
                 try:
-                    fig = plot_ternary(df_f, comp, color_col, log_col=log_c)
+                    fig = plot_ternary(df_f, comp, color_col, log_color=log_c)
                     if fig: st.pyplot(fig); plt.close(fig)
                 except Exception as e: st.error(f"Error: {e}")
 
