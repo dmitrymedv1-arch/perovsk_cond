@@ -2232,7 +2232,7 @@ def main():
                 except Exception as e: st.error(f"Error: {e}")
 
         elif plot_kind == "Pairplot":
-            cols = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['Ea_final'],
+            cols = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns],
                                    default=['ρ, %', 'd, mkm', 'Ea_final'], key='pp_cols')
             hue = st.selectbox("Hue", ['None'] + list(FILTER_LABELS.keys()), key='pp_hue')
             if st.button("Generate", key='pp_btn') and len(cols) >= 2:
