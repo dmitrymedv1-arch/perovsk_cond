@@ -1,3 +1,4 @@
+
 # ============================================
 # app.py - Ceramic Conductivity Data Explorer v4 (FULL)
 # ============================================
@@ -604,7 +605,7 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
                                   label=f'{lbl}: {v:.3f}')
                    for ms, lbl, v in [(20, 'Min', lo), (60, 'Median', med), (150, 'Max', hi)]]
         ax.legend(handles=handles, title=size_title, loc='upper right',
-          bbox_to_anchor=(1.0, 1.0), frameon=True, framealpha=0.5)
+                  bbox_to_anchor=(1.0, 1.0), frameon=True, framealpha=0.5)
     style_axis(ax, xlabel, ylabel)
 
     if build_marg and len(marg_axes) > 0:
@@ -738,7 +739,7 @@ def ternary_to_xy(a, b, c):
     if total == 0: return 0, 0
     return 0.5*(2*b + c)/total, (np.sqrt(3)/2)*c/total
 
-def plot_ternary(df, comp_cols, color_col, palette='viridis', or=False):
+def plot_ternary(df, comp_cols, color_col, palette='viridis', log_color=False):
     comp_cols = [c for c in comp_cols if c in df.columns]
     if len(comp_cols) != 3: return None
     d = df[comp_cols + [color_col]].dropna()
