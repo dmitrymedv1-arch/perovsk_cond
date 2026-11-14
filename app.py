@@ -554,33 +554,39 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
                         size_col_raw=None, y_col_raw=None):
     d = df.dropna(subset=[x_col, y_col, color_col, size_col]).copy()
     if len(d) == 0: return None
-    raw_s = d[size_col_raw].copy() if size_col_raw and size_col_raw in d.columns else d[size_col].copy()
-    raw_y = d[y_col_raw].copy() if y_col_raw and y_col_raw in d.columns else d[y_col].copy()
-    x, y, c, s = d[x_col].values, d[y_col].values, d[color_col].values, d[size_col].values
+
+    # --- single boolean mask applied to d, then rebuild all arrays from the SAME rows ---
+    mask = np.ones(len(d), dtype=bool)
+    if x_log:     mask &= (d[x_col].values > 0)
+    if y_log:     mask &= (d[y_col].values > 0)
+    if color_log: mask &= (d[color_col].values > 0)
+    if size_log:  mask &= (d[size_col].values > 0)
+    if mask.sum() == 0: return None
+    d = d[mask]  # keeps original df index; all downstream arrays come from these same rows
+
+    x = d[x_col].values
+    y = d[y_col].values
+    c = d[color_col].values
+    s = d[size_col].values
+    raw_s = (d[size_col_raw].values if size_col_raw and size_col_raw in d.columns
+             else d[size_col].values)
+    raw_y = (d[y_col_raw].values if y_col_raw and y_col_raw in d.columns
+             else d[y_col].values)
+
     if x_log:
-        m = x > 0
-        if m.sum() == 0: return None
-        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
         x = np.log10(x); xlabel = f'log10({xlabel})'
     if y_log:
-        m = y > 0
-        if m.sum() == 0: return None
-        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
         y = np.log10(y); ylabel = f'log10({ylabel})'
     if color_log:
-        m = c > 0
-        if m.sum() == 0: return None
-        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
         c = np.log10(c)
     if size_log:
-        m = s > 0
-        if m.sum() == 0: return None
-        x, y, c, s = x[m], y[m], c[m], s[m]; d = d[m]; raw_s = raw_s[m]; raw_y = raw_y[m]
         s = np.log10(s)
+
     if len(s) > 0:
         smin, smax = s.min(), s.max()
         s_sc = 20 + 180*(s - smin)/(smax - smin) if smax > smin else np.ones_like(s)*50
-    else: s_sc = np.ones_like(s)*50
+    else:
+        s_sc = np.ones_like(s)*50
 
     build_marg = show_marginals and ((size_col_name is not None and size_col_raw is not None) or
                                      (filter_display_name is not None and filter_name is not None and show_legend))
@@ -594,14 +600,20 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
     else:
         fig, ax = plt.subplots(figsize=(8, 6)); marg_axes = []
 
+    # explicit normalization over the CURRENT filtered color array
+    if len(c) > 0 and np.min(c) < np.max(c):
+        c_norm = Normalize(vmin=float(np.min(c)), vmax=float(np.max(c)))
+    else:
+        c_norm = Normalize(vmin=0.0, vmax=1.0)
+
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
-        # draw points in fixed marker dict order (dict already ordered by ADDITIVE_ORDER)
         for cat, mk in marker_style.items():
             m = d[filter_name] == cat
             if m.sum() > 0:
-                ax.scatter(x[m], y[m], c=c[m], s=s_sc[m], cmap=palette, marker=mk,
+                ax.scatter(x[m], y[m], c=c[m], s=s_sc[m], cmap=palette, norm=c_norm, marker=mk,
                            alpha=0.7, edgecolors='black', linewidth=0.5)
-        sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5, visible=False)
+        sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, norm=c_norm,
+                        alpha=0.7, edgecolors='black', linewidth=0.5, visible=False)
         plt.colorbar(sc, ax=ax).set_label(d[color_col].name, fontsize=11, fontweight='bold')
         # fixed-size category legend (only present categories, in fixed order)
         present_cats = [cat for cat in marker_style.keys() if (d[filter_name] == cat).any()]
@@ -616,9 +628,11 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
                              title=humanize_filter(filter_display_name) + ':' if filter_display_name else 'Category:')
             ax.add_artist(leg1)
     else:
-        sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5,
+        sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, norm=c_norm, alpha=0.7,
+                        edgecolors='black', linewidth=0.5,
                         marker=marker_style if isinstance(marker_style, str) else 'o')
         plt.colorbar(sc, ax=ax).set_label(d[color_col].name, fontsize=11, fontweight='bold')
+
     if size_col_name is not None:
         size_title = humanize_size(size_col_name) + ':'
         if len(s) > 0: lo, med, hi = s.min(), np.percentile(s, 50), s.max()
@@ -632,12 +646,12 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
     style_axis(ax, xlabel, ylabel)
 
     if build_marg and len(marg_axes) > 0:
-        y_raw_arr = np.asarray(raw_y.values, dtype=float)
+        y_raw_arr = np.asarray(raw_y, dtype=float)
         ax_i = 0
         if size_col_name is not None and size_col_raw is not None:
-            s_raw = np.asarray(raw_s.values, dtype=float)
-            mask = np.isfinite(s_raw) & np.isfinite(y_raw_arr)
-            sr, yr = s_raw[mask], y_raw_arr[mask]
+            s_raw = np.asarray(raw_s, dtype=float)
+            mask_m = np.isfinite(s_raw) & np.isfinite(y_raw_arr)
+            sr, yr = s_raw[mask_m], y_raw_arr[mask_m]
             if len(sr) >= 3:
                 q33, q66 = np.percentile(sr, 33.333), np.percentile(sr, 66.667)
                 groups = [(n_, yr[m]) for n_, m in [('0–33%', sr <= q33), ('33–66%', (sr > q33) & (sr <= q66)), ('66–100%', sr > q66)] if m.sum() > 0]
