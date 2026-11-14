@@ -149,13 +149,15 @@ FILTER_LABELS = {
 COMMON_MARKERS = ['o', 's', 'D', '*', '^', 'v', '<', '>', 'p', 'P', 'X']
 
 MARKER_MAP = {
-    'Sintering additive': {'Pure': 'o', 'Cu': 's', 'Ni': 'D', 'Zn': '*', 'Fe': '^',
+    'Sintering additive': {'Pure': 'o', 'Ni': 's', 'Cu': 'D', 'Zn': '*', 'Fe': '^',
                             'Co': 'v', 'Mn': '<', 'Cr': '>', 'Ag': 'p', 'Au': 'P', 'Pt': 'X'},
     'Atmospheres': {'Ox': 'o', 'Redox': 's', 'Inert': '^', 'Reducing': 'v', 'Air': 'D'},
     'Humidity': {'wet': 'D', 'dry': '*', 'humid': 's', 'Wet': 'D', 'Dry': '*'},
     'Structure': {'Cubic': 'o', 'orthorhombic': 's', 'hexagonal': '^',
                   'monoclinic': 'D', 'tetragonal': '*', 'rhombohedral': 'v'},
 }
+
+ADDITIVE_ORDER = ['Pure', 'Ni', 'Cu', 'Zn']
 
 IONIC_RADII = {'Ba': 1.61, 'Zr': 0.72, 'Ce': 0.87, 'Sn': 0.69, 'Y': 0.90,
                'Gd': 0.94, 'Yb': 0.87, 'Sm': 0.96, 'O': 1.40}
@@ -301,9 +303,21 @@ def get_filter_markers(df, active_count):
     if active_count != 1: return 'o', False, None
     for fname in FILTER_LABELS.keys():
         if fname in df.columns:
-            vals = [v for v in df[fname].dropna().unique() if v != '']
-            if len(vals) > 1:
-                return {v: COMMON_MARKERS[i % len(COMMON_MARKERS)] for i, v in enumerate(vals)}, True, fname
+            present = [v for v in df[fname].dropna().unique() if v != '']
+            if len(present) > 1:
+                # Fixed order & fixed markers for Sintering additive (independent of filters)
+                if fname == 'Sintering additive':
+                    marker_map = MARKER_MAP.get('Sintering additive', {})
+                    present_set = set(present)
+                    ordered = {v: marker_map.get(v, 'o')
+                               for v in ADDITIVE_ORDER if v in present_set}
+                    # append any present categories not in ADDITIVE_ORDER (stable, at end)
+                    for v in present:
+                        if v not in ordered:
+                            ordered[v] = marker_map.get(v, 'o')
+                    return ordered, True, fname
+                # other filters: keep original behaviour
+                return {v: COMMON_MARKERS[i % len(COMMON_MARKERS)] for i, v in enumerate(present)}, True, fname
     return 'o', False, None
 
 def humanize_size(s): return COLUMN_LABELS.get(s, s)
@@ -581,17 +595,26 @@ def create_bubble_chart(df, x_col, y_col, color_col, size_col, x_log, y_log, col
         fig, ax = plt.subplots(figsize=(8, 6)); marg_axes = []
 
     if show_legend and isinstance(marker_style, dict) and filter_name is not None:
-        for cat in d[filter_name].unique():
+        # draw points in fixed marker dict order (dict already ordered by ADDITIVE_ORDER)
+        for cat, mk in marker_style.items():
             m = d[filter_name] == cat
             if m.sum() > 0:
-                ax.scatter(x[m], y[m], c=c[m], s=s_sc[m], cmap=palette, marker=marker_style.get(cat, 'o'),
-                           alpha=0.7, edgecolors='black', linewidth=0.5, label=str(cat))
+                ax.scatter(x[m], y[m], c=c[m], s=s_sc[m], cmap=palette, marker=mk,
+                           alpha=0.7, edgecolors='black', linewidth=0.5)
         sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5, visible=False)
         plt.colorbar(sc, ax=ax).set_label(d[color_col].name, fontsize=11, fontweight='bold')
-        leg1 = ax.legend(loc='upper right', bbox_to_anchor=(0.6, 1.0),
-                         frameon=True, framealpha=0.5,
-                         title=humanize_filter(filter_display_name) + ':' if filter_display_name else 'Category:')
-        ax.add_artist(leg1)
+        # fixed-size category legend (only present categories, in fixed order)
+        present_cats = [cat for cat in marker_style.keys() if (d[filter_name] == cat).any()]
+        if present_cats:
+            cat_handles = [mlines.Line2D([0], [0], marker=marker_style[cat], color='w',
+                                          markersize=10, markerfacecolor='gray',
+                                          markeredgecolor='black', linewidth=0,
+                                          label=str(cat))
+                           for cat in present_cats]
+            leg1 = ax.legend(handles=cat_handles, loc='upper right', bbox_to_anchor=(0.6, 1.0),
+                             frameon=True, framealpha=0.5, markerscale=1.0,
+                             title=humanize_filter(filter_display_name) + ':' if filter_display_name else 'Category:')
+            ax.add_artist(leg1)
     else:
         sc = ax.scatter(x, y, c=c, s=s_sc, cmap=palette, alpha=0.7, edgecolors='black', linewidth=0.5,
                         marker=marker_style if isinstance(marker_style, str) else 'o')
@@ -2218,18 +2241,20 @@ def main():
             lx = c1.checkbox("log X", key='bb_lx'); ly = c2.checkbox("log Y", key='bb_ly')
             lc = c3.checkbox("log C", key='bb_lc'); ls = c4.checkbox("log S", key='bb_ls')
             show_marg = st.checkbox("Marginal distributions", key='bb_marg')
-            if st.button("Generate bubble", key='bb_btn'):
-                try:
-                    d_plot = df_f.copy()
-                    if color_col == 'None': d_plot['_c'] = 1; color_col = '_c'
-                    if size_col == 'None': d_plot['_s'] = 1; size_col = '_s'
-                    ylab = y_col.replace('σ total, ', 'σ at ') + ' °C (mS/cm)' if y_col in TEMP_COLS else 'Ea (eV)'
-                    fig = create_bubble_chart(d_plot, x_col, y_col, color_col, size_col, lx, ly, lc, ls,
-                                              COLOR_PALETTES['Viridis'], x_col, ylab, marker_style, show_leg, filt_name,
-                                              size_col if size_col != '_s' else None, filt_name if show_leg else None,
-                                              show_marg, False, size_col if size_col != '_s' else None, y_col)
-                    if fig: st.pyplot(fig); plt.close(fig)
-                except Exception as e: st.error(f"Error: {e}")
+            # auto-render: no button, re-runs on any widget/filter change
+            try:
+                d_plot = df_f.copy()
+                _color_col, _size_col = color_col, size_col
+                if _color_col == 'None': d_plot['_c'] = 1; _color_col = '_c'
+                if _size_col == 'None': d_plot['_s'] = 1; _size_col = '_s'
+                ylab = y_col.replace('σ total, ', 'σ at ') + ' °C (mS/cm)' if y_col in TEMP_COLS else 'Ea (eV)'
+                fig = create_bubble_chart(d_plot, x_col, y_col, _color_col, _size_col, lx, ly, lc, ls,
+                                          COLOR_PALETTES['Viridis'], x_col, ylab, marker_style, show_leg, filt_name,
+                                          size_col if _size_col != '_s' else None, filt_name if show_leg else None,
+                                          show_marg, False, size_col if _size_col != '_s' else None, y_col)
+                if fig: st.pyplot(fig); plt.close(fig)
+                else: st.info("No valid data for current selection.")
+            except Exception as e: st.warning(f"Bubble chart unavailable: {e}")
 
         elif plot_kind == "Pairplot":
             cols = st.multiselect("Features", NUMERIC_DESCRIPTORS + ['Ea_final'] + [c for c in TEMP_COLS if c in df_f.columns],
